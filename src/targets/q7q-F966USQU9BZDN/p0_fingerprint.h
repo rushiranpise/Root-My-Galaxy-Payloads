@@ -1,5 +1,3 @@
-// Generated from the exact raw Image.
-// Each row maps actual slide to Image[0x1f0000 - slide].
 #ifndef P0_FINGERPRINT_H
 #define P0_FINGERPRINT_H
 
