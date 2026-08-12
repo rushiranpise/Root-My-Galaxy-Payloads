@@ -1,0 +1,112 @@
+# target.h derivation report for a15x-S156VUDSBDZDC
+
+- [DERIVED] KIMAGE_TEXT_BASE = 0xffffffc008000000 (recovered ELF PT_LOAD base)
+- [DERIVED] BUILD_FINGERPRINT = samsung/a15xtfn/a15x:16/BP2A.250605.031.A3/S156VUDSBDZDC:user/release-keys (--fingerprint input)
+- [SCAFFOLD] BUILD_VARIANT_LABEL app-physical-p0-oracle kept from template (template does not use this label suffix)
+- [DERIVED] BUILD_VARIANT_LABEL (root) = a15x-S156VUDSBDZDC-root-umh
+- [DERIVED] P0_FINGERPRINT_HEADER = targets/a15x-S156VUDSBDZDC/p0_fingerprint.h
+- [DERIVED] ASHMEM_FOPS_OFF = 0x1ec4050 (nm ashmem_fops - base)
+- [DERIVED] ASHMEM_IOCTL_OFF = 0x105430c (nm ashmem_ioctl - base)
+- [DERIVED] ASHMEM_COMPAT_IOCTL_OFF = 0x1054968 (nm compat_ashmem_ioctl - base)
+- [DERIVED] ASHMEM_MMAP_OFF = 0x10549c0 (nm ashmem_mmap - base)
+- [DERIVED] ASHMEM_OPEN_OFF = 0x1054ca0 (nm ashmem_open - base)
+- [DERIVED] ASHMEM_RELEASE_OFF = 0x1054d38 (nm ashmem_release - base)
+- [DERIVED] ASHMEM_SHOW_FDINFO_OFF = 0x1054e54 (nm ashmem_show_fdinfo - base)
+- [DERIVED] CONFIGFS_READ_ITER_OFF = 0x5d095c (nm configfs_read_iter - base)
+- [DERIVED] CONFIGFS_BIN_WRITE_ITER_OFF = 0x5d1384 (nm configfs_bin_write_iter - base)
+- [DERIVED] COPY_SPLICE_READ_OFF = 0x5246f4 (nm generic_file_splice_read - base)
+- [DERIVED] NOOP_LLSEEK_OFF = 0x4b8bf0 (nm noop_llseek - base)
+- [DERIVED] INIT_TASK_OFF = 0x2a49040 (nm init_task - base)
+- [DERIVED] ROOT_TASK_GROUP_OFF = 0x2af8ac0 (nm root_task_group - base)
+- [DERIVED] KMALLOC_CACHES_OFF = 0x1f1ab88 (nm kmalloc_caches - base)
+- [DERIVED] ANON_PIPE_BUF_OPS_OFF = 0x1d5ade0 (nm anon_pipe_buf_ops - base)
+- [DERIVED] CALL_USERMODEHELPER_EXEC_WORK_OFF = 0x104474 (nm call_usermodehelper_exec_work - base)
+- [DERIVED] SYSTEM_UNBOUND_WQ_OFF = 0x28e07d8 (nm system_unbound_wq - base)
+- [DERIVED] SLIDE_NFULNL_LOGGER_OBJECT_OFF = 0x28e1e28 (nm nfulnl_logger - base)
+- [DERIVED] SLIDE_SYSCTL_BOOTID_OFF = 0x2c6da21 (nm sysctl_bootid - base)
+- [DERIVED] ASHMEM_MISC_FOPS_OFF = 0x2a40f28 (nm ashmem_misc + BTF miscdevice.fops)
+- [DERIVED] SELINUX_ENFORCING_OFF = 0x2bcce88 (nm selinux_state + BTF selinux_state.enforcing)
+- [DERIVED] FAKE_TASK_USAGE_OFF = 0x38 (BTF task_struct.usage)
+- [DERIVED] FAKE_TASK_PRIO_OFF = 0x7c (BTF task_struct.prio)
+- [DERIVED] FAKE_TASK_NORMAL_PRIO_OFF = 0x84 (BTF task_struct.normal_prio)
+- [DERIVED] FAKE_TASK_TASK_GROUP_OFF = 0x400 (BTF task_struct.sched_task_group)
+- [DERIVED] FAKE_TASK_PI_LOCK_OFF = 0x884 (BTF task_struct.pi_lock)
+- [DERIVED] FAKE_TASK_PI_WAITERS_OFF = 0x898 (BTF task_struct.pi_waiters)
+- [DERIVED] FAKE_TASK_PI_TOP_TASK_OFF = 0x8a8 (BTF task_struct.pi_top_task)
+- [DERIVED] FAKE_TASK_PI_BLOCKED_ON_OFF = 0x8b0 (BTF task_struct.pi_blocked_on)
+- [INFO] WORK_DATA_OFF = 0x0 (BTF work_struct.data) already correct in template; kept as-is
+- [INFO] WORK_ENTRY_OFF = 0x8 (BTF work_struct.entry) already correct in template; kept as-is
+- [INFO] WORK_FUNC_OFF = 0x18 (BTF work_struct.func) already correct in template; kept as-is
+- [SCAFFOLD] STRUCT_PAGE_COMPOUND_HEAD_OFF kept from template (BTF page.compound_head missing)
+- [SCAFFOLD] STRUCT_SLAB_CACHE_OFF kept from template (BTF page.slab_cache missing)
+- [SCAFFOLD] STRUCT_PAGE_TYPE_OFF kept from template (BTF page.page_type missing)
+- [INFO] STRUCT_PAGE_SIZE = 0x40 (BTF sizeof(struct page)) already correct in template; kept as-is
+- [INFO] FOPS_OWNER_OFF = 0x0 (BTF file_operations.owner) already correct in template; kept as-is
+- [INFO] FOPS_LLSEEK_OFF = 0x8 (BTF file_operations.llseek) already correct in template; kept as-is
+- [INFO] FOPS_READ_OFF = 0x10 (BTF file_operations.read) already correct in template; kept as-is
+- [INFO] FOPS_WRITE_OFF = 0x18 (BTF file_operations.write) already correct in template; kept as-is
+- [INFO] FOPS_READ_ITER_OFF = 0x20 (BTF file_operations.read_iter) already correct in template; kept as-is
+- [INFO] FOPS_WRITE_ITER_OFF = 0x28 (BTF file_operations.write_iter) already correct in template; kept as-is
+- [INFO] FOPS_IOCTL_OFF = 0x50 (BTF file_operations.unlocked_ioctl) already correct in template; kept as-is
+- [INFO] FOPS_COMPAT_IOCTL_OFF = 0x58 (BTF file_operations.compat_ioctl) already correct in template; kept as-is
+- [INFO] FOPS_MMAP_OFF = 0x60 (BTF file_operations.mmap) already correct in template; kept as-is
+- [INFO] FOPS_OPEN_OFF = 0x70 (BTF file_operations.open) already correct in template; kept as-is
+- [INFO] FOPS_RELEASE_OFF = 0x80 (BTF file_operations.release) already correct in template; kept as-is
+- [INFO] FOPS_SPLICE_READ_OFF = 0xc8 (BTF file_operations.splice_read) already correct in template; kept as-is
+- [INFO] FOPS_SHOW_FDINFO_OFF = 0xe0 (BTF file_operations.show_fdinfo) already correct in template; kept as-is
+- [INFO] SIZEOF_FILE_OPERATIONS not emitted: template does not define it, and FOPS_SHOW_FDINFO_OFF satisfies the size gate
+- [INFO] WQ_DFL_PWQ_OFF = 0xb0 (BTF workqueue_struct.dfl_pwq) already correct in template; kept as-is
+- [INFO] PWQ_POOL_OFF = 0x0 (BTF pool_workqueue.pool) already correct in template; kept as-is
+- [INFO] PWQ_WQ_OFF = 0x8 (BTF pool_workqueue.wq) already correct in template; kept as-is
+- [INFO] PWQ_WORK_COLOR_OFF = 0x10 (BTF pool_workqueue.work_color) already correct in template; kept as-is
+- [INFO] PWQ_REFCNT_OFF = 0x18 (BTF pool_workqueue.refcnt) already correct in template; kept as-is
+- [INFO] PWQ_NR_IN_FLIGHT_OFF = 0x1c (BTF pool_workqueue.nr_in_flight) already correct in template; kept as-is
+- [INFO] PWQ_NR_ACTIVE_OFF = 0x5c (BTF pool_workqueue.nr_active) already correct in template; kept as-is
+- [INFO] PWQ_MAX_ACTIVE_OFF = 0x60 (BTF pool_workqueue.max_active) already correct in template; kept as-is
+- [DERIVED] POOL_WORKLIST_OFF = 0x20 (BTF worker_pool.worklist)
+- [DERIVED] POOL_NR_IDLE_OFF = 0x34 (BTF worker_pool.nr_idle)
+- [INFO] CFG_PAGE_OFF = 0x10 (BTF configfs_buffer.page) already correct in template; kept as-is
+- [INFO] CFG_NEEDS_READ_FILL_OFF = 0x50 (BTF configfs_buffer.needs_read_fill) already correct in template; kept as-is
+- [INFO] CFG_BIN_BUFFER_OFF = 0x58 (BTF configfs_buffer.bin_buffer) already correct in template; kept as-is
+- [INFO] CFG_BIN_BUFFER_SIZE_OFF = 0x60 (BTF configfs_buffer.bin_buffer_size) already correct in template; kept as-is
+- [INFO] CFG_CB_MAX_SIZE_OFF = 0x64 (BTF configfs_buffer.cb_max_size) already correct in template; kept as-is
+- [WARN] 5 'bl schedule' sites in worker_thread; SLIDE_TRACEFS_WORKER_CALLER_OFF kept from template
+- [SCAFFOLD] P0_PAGE_OFFSET kept from template (direct-map identity / page offset)
+- [SCAFFOLD] P0_PHYS_OFFSET kept from template (physical load address (sboot disassembly))
+- [SCAFFOLD] P0_KERNEL_PHYS_LOAD kept from template (kernel physical load address (sboot disassembly))
+- [SCAFFOLD] SLIDE_TRACEFS_EVENT_ID kept from template (tracefs sched_blocked_reason event id)
+- [SCAFFOLD] SLIDE_PSELECT_WORD_SHIFT kept from template (pselect6 fd-set qword layout)
+- [SCAFFOLD] SLIDE_NFULNL_LOGGER_NAME_OFF kept from template (nfnetlink_log name string target)
+- [SCAFFOLD] SLIDE_RANDOM_TABLE_BOOT_ID_DATA_PTR_OFF kept from template (random_table[] boot_id data pointer)
+- [SCAFFOLD] LOCK_OFF kept from template (fake-task page layout)
+- [SCAFFOLD] W0_OFF kept from template (fake-task page layout)
+- [SCAFFOLD] FOPS_OFF kept from template (fake-task page layout)
+- [SCAFFOLD] SCRATCH_OFF kept from template (fake-task page layout)
+- [SCAFFOLD] RIGHT_OFF kept from template (fake-task page layout)
+- [SCAFFOLD] LEFT_OFF kept from template (fake-task page layout)
+- [SCAFFOLD] FAKE_TASK_OFF kept from template (fake-task page layout)
+- [SCAFFOLD] FAKE_WAITER_PI_TREE_ENTRY_OFF kept from template (fake waiter layout)
+- [SCAFFOLD] FAKE_WAITER_TASK_OFF kept from template (fake waiter layout)
+- [SCAFFOLD] FAKE_WAITER_LOCK_OFF kept from template (fake waiter layout)
+- [SCAFFOLD] FAKE_WAITER_WAKE_STATE_OFF kept from template (fake waiter layout)
+- [SCAFFOLD] FAKE_WAITER_WW_CTX_OFF kept from template (fake waiter layout)
+
+## Manual verification of never-derived macros (SM-S156V ground truth)
+
+These values are not auto-derivable and were corrected from the actual device
+and its recovered kernel:
+
+- `SLIDE_TRACEFS_EVENT_ID` 106 -> 108: read live from the connected SM-S156V
+  (`/sys/kernel/tracing/events/sched/sched_blocked_reason/id`).
+- `SLIDE_NFULNL_LOGGER_NAME_OFF` 0x01d5dbd6 -> 0x01c233eb: byte offset of the
+  `nfnetlink_log` string in the decompressed raw Image (kallsyms token
+  compression hides it from the nm).
+- `SLIDE_RANDOM_TABLE_BOOT_ID_DATA_PTR_OFF` 0x02bba8c0 -> 0x029fef18: the
+  `.data` qword slot in `random_table[]` holding the `sysctl_bootid` pointer
+  (0xffffffc00ac6da21), located by scanning the decompressed Image.
+- `P0_PHYS_OFFSET` / `P0_KERNEL_PHYS_LOAD` 0x80000000 -> 0x40000000: MediaTek
+  LK loads the Image at 0x40000000 (same family convention as the verified
+  A155N vendor_boot `kernel_addr`; text_offset == 0). Re-verify from
+  vendor_boot.img.lz4 if the p0 oracle fails on device.
+- `SLIDE_PSELECT_WORD_SHIFT` left at the 5.15 scaffold value 3; requires
+  `do_pselect` disassembly verification before hardware testing.
