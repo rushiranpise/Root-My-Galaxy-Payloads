@@ -178,5 +178,20 @@
         "size": 4758872
       }
     }
-  ]
+  ,
+    {
+      "payloadId": "a15x-S156VUDSBDZDC",
+      "displayName": "Galaxy A15 5G | Kernel 5.15.180",
+      "models": ["SM-S156V"],
+      "kernelVersions": ["5.15.180"],
+      "exploit": {
+        "url": "https://raw.githubusercontent.com/BuSung-dev/Root-My-Galaxy-Payloads/main/artifacts/a15x-S156VUDSBDZDC/cve-2026-43499-app.so",
+        "size": 104128
+      },
+      "kernelsu": {
+        "url": "https://raw.githubusercontent.com/BuSung-dev/Root-My-Galaxy-Payloads/main/kernelsu/ksud-dm3q-S9180ZHS8FZF5-kdp",
+        "size": 4556352
+      }
+    }
+]
 }
