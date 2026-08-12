@@ -90,3 +90,23 @@
 - [SCAFFOLD] FAKE_WAITER_LOCK_OFF kept from template (fake waiter layout)
 - [SCAFFOLD] FAKE_WAITER_WAKE_STATE_OFF kept from template (fake waiter layout)
 - [SCAFFOLD] FAKE_WAITER_WW_CTX_OFF kept from template (fake waiter layout)
+
+## Manual verification of never-derived macros (SM-S156V ground truth)
+
+These values are not auto-derivable and were corrected from the actual device
+and its recovered kernel:
+
+- `SLIDE_TRACEFS_EVENT_ID` 106 -> 108: read live from the connected SM-S156V
+  (`/sys/kernel/tracing/events/sched/sched_blocked_reason/id`).
+- `SLIDE_NFULNL_LOGGER_NAME_OFF` 0x01d5dbd6 -> 0x01c233eb: byte offset of the
+  `nfnetlink_log` string in the decompressed raw Image (kallsyms token
+  compression hides it from the nm).
+- `SLIDE_RANDOM_TABLE_BOOT_ID_DATA_PTR_OFF` 0x02bba8c0 -> 0x029fef18: the
+  `.data` qword slot in `random_table[]` holding the `sysctl_bootid` pointer
+  (0xffffffc00ac6da21), located by scanning the decompressed Image.
+- `P0_PHYS_OFFSET` / `P0_KERNEL_PHYS_LOAD` 0x80000000 -> 0x40000000: MediaTek
+  LK loads the Image at 0x40000000 (same family convention as the verified
+  A155N vendor_boot `kernel_addr`; text_offset == 0). Re-verify from
+  vendor_boot.img.lz4 if the p0 oracle fails on device.
+- `SLIDE_PSELECT_WORD_SHIFT` left at the 5.15 scaffold value 3; requires
+  `do_pselect` disassembly verification before hardware testing.
