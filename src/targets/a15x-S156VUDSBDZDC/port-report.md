@@ -110,3 +110,9 @@ and its recovered kernel:
   vendor_boot.img.lz4 if the p0 oracle fails on device.
 - `SLIDE_PSELECT_WORD_SHIFT` left at the 5.15 scaffold value 3; requires
   `do_pselect` disassembly verification before hardware testing.
+- `MM_STRUCT_SZ` (default 0x500 -> 0x400): sizeof(struct mm_struct) = 0x3e0
+  (BTF-derived struct-offsets.json), SLUB object stride 0x400 under
+  SLAB_HWCACHE_ALIGN (same as the e1s/e2s 5.15 family). The 0x500 fallback
+  made the KernelSnitch mm_struct bruteforce step every slab at the wrong
+  stride, so no candidate ever validated on device (deterministic
+  "sk_buff page leak failed" at 7/7 attempts). MM_ORDER stays 3 (default).
