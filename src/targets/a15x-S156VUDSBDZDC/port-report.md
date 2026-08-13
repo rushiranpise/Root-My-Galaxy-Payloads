@@ -108,8 +108,19 @@ and its recovered kernel:
   LK loads the Image at 0x40000000 (same family convention as the verified
   A155N vendor_boot `kernel_addr`; text_offset == 0). Re-verify from
   vendor_boot.img.lz4 if the p0 oracle fails on device.
-- `SLIDE_PSELECT_WORD_SHIFT` left at the 5.15 scaffold value 3; requires
-  `do_pselect` disassembly verification before hardware testing.
+- `SLIDE_PSELECT_WORD_SHIFT` scaffold value 3 is UNUSED on this target: the
+  5.15 monolithic `do_futex` (0x140 frame) pushes the stale on-stack
+  `rt_mutex_waiter` (T-0x4b8, verified from the panic dump) 0xb8 below the
+  pselect6 `stack_fds` copy (T-0x3f0), so no WORD_SHIFT can reach it.
+- `SLIDE_USE_SETSO_SPRAY` = 1: the slide spray goes through
+  `ip_setsockopt()` optname 43/44/46/47, which zeroes a 0x108-byte stack
+  buffer at T-0x4f8 and `copy_from_user`s it with no capability check, so the
+  waiter words land exactly on the stale waiter at buffer+0x40. Verified from
+  the kernel disassembly: entry depth 0x1e0 + wrapper 0x10 + __sys_setsockopt
+  0x70 + sock_common_setsockopt 0x10 + udp_setsockopt 0x10 + ip_setsockopt
+  0x290 = 0x510; buffer = T-0x4f8. The handler then fails validation
+  (buffer[0x20] != 2 -> EINVAL) and returns; the trigger is only armed after
+  the EINVAL is observed so a policy-denied spray never walks garbage.
 - `MM_STRUCT_SZ` (default 0x500 -> 0x400): sizeof(struct mm_struct) = 0x3e0
   (BTF-derived struct-offsets.json), SLUB object stride 0x400 under
   SLAB_HWCACHE_ALIGN (same as the e1s/e2s 5.15 family). The 0x500 fallback

