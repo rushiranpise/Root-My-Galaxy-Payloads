@@ -208,5 +208,16 @@
         "size": 4556352
       }
     }
+,
+    {
+      "payloadId": "b2q-F711U1UESHKZE3",
+      "displayName": "Galaxy SM-F711U1 | Kernel 5.4.274",
+      "models": ["SM-F711U1"],
+      "kernelVersions": ["5.4.274"],
+      "exploit": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/artifacts/b2q-F711U1UESHKZE3/cve-2026-43499-app.so",
+        "size": 104128
+      }
+    }
 ]
 }
