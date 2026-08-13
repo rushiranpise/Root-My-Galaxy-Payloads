@@ -437,7 +437,7 @@ long sched_setattr_tid(int tid, int nice_value) {
   struct local_sched_attr attr;
   memset(&attr, 0, sizeof(attr));
   attr.size = sizeof(attr);
-  attr.sched_policy = SCHED_BATCH;
+  attr.sched_policy = SCHED_NORMAL;
   attr.sched_nice = nice_value;
   return syscall(SYS_sched_setattr, tid, &attr, 0);
 }
