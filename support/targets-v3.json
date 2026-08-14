@@ -219,5 +219,20 @@
         "size": 104128
       }
     }
+,
+    {
+      "payloadId": "gts9fewifi-X510XXUCEZE4",
+      "displayName": "Galaxy Tab S9 FE | Kernel 5.15.189",
+      "models": ["SM-X510"],
+      "kernelVersions": ["5.15.189"],
+      "exploit": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/artifacts/gts9fewifi-X510XXUCEZE4/cve-2026-43499-app.so",
+        "size": 104128
+      },
+      "kernelsu": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-dm3q-S9180ZHS8FZF5-kdp",
+        "size": 4556352
+      }
+    }
 ]
 }
