@@ -51,10 +51,50 @@ def is_shallow(tree: str) -> bool:
     return result.stdout.strip() == "true"
 
 
+def head(tree: str) -> str | None:
+    result = subprocess.run(
+        ["git", "-C", tree, "rev-parse", "HEAD"], capture_output=True, text=True, check=False
+    )
+    return result.stdout.strip() or None
+
+
+def exact_tag(tree: str) -> str | None:
+    """The tag that points at HEAD, if one does.
+
+    `--exact-match` and not `--abbrev=0`: the latter answers with the *nearest* tag, which is what a
+    build past the tag would be described by, and that is the case worth telling apart.
+    """
+    result = subprocess.run(
+        ["git", "-C", tree, "describe", "--tags", "--exact-match", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.stdout.strip() or None
+
+
+def write_receipt(path: str, version: int, commit: str, ref: str, tag: str | None) -> None:
+    """What this half stamped, for the half that cannot see this checkout.
+
+    The two halves of a pair are built in different jobs from different clones, and the job that
+    publishes them has neither. A receipt is how the version a module was built with travels beside
+    the artifact it is stamped into, so the pair can be compared at all - and so the comparison at
+    publish time does not depend on a checkout that no longer exists.
+    """
+    with open(path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(f"version={version}\n")
+        handle.write(f"commit={commit}\n")
+        handle.write(f"ref={ref}\n")
+        handle.write(f"tag={tag or ''}\n")
+    print(f"wrote {path}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--log", required=True, help="the build's output, as Kbuild printed it")
     parser.add_argument("--tree", required=True, help="the KernelSU checkout the build used")
+    parser.add_argument("--receipt", help="write the version this build stamped, for check_pair_version.py")
+    parser.add_argument("--ref", help="the tag this build was asked for, recorded in the receipt")
     arguments = parser.parse_args()
 
     with open(arguments.log, encoding="utf-8", errors="replace") as handle:
@@ -104,6 +144,16 @@ def main() -> int:
         return 1
 
     print(f"module version {expected} = {VERSION_BASE} + {expected_count} commits at this tag")
+
+    if arguments.receipt:
+        commit = head(arguments.tree)
+        if commit is None:
+            print(f"error: {arguments.tree} has no HEAD to record", file=sys.stderr)
+            return 1
+        tag = exact_tag(arguments.tree)
+        write_receipt(arguments.receipt, expected, commit, arguments.ref or tag or "", tag)
+        print(f"  at commit {commit[:12]}, tag {tag or '(none exactly)'}")
+
     return 0
 
 

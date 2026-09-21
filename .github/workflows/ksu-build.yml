@@ -439,7 +439,13 @@ jobs:
           llvm-strip -d kernelsu.ko
 
       - name: The version has to have come from the tag
-        run: python3 tools/check_kernel_version.py --log /tmp/kbuild.log --tree KernelSU
+        run: |
+          # The receipt is how this half's version reaches the job that publishes it: a pair is built
+          # by two jobs from two clones, and neither the publish job nor the other half can see this
+          # checkout. `--ref` records what this run asked for, which `check_pair_version.py` then holds
+          # the daemon to.
+          python3 tools/check_kernel_version.py --log /tmp/kbuild.log --tree KernelSU \
+            --ref "${{ env.KSU_REF }}" --receipt module-version.txt
 
       - name: Diff the imports against the device-tested module
         env:
@@ -493,8 +499,11 @@ jobs:
         with:
           name: pair-module-${{ env.FLAVOR }}-${{ inputs.target_id }}
           # Spelled out rather than read back from $GITHUB_ENV: the `env` context in an expression is
-          # filled from `env:` keys, not from what a previous step exported.
-          path: ${{ inputs.pair_kmi || 'android15-6.6' }}_kernelsu${{ env.FLAVOR_SUFFIX }}-${{ inputs.target_id }}-kdp.ko
+          # filled from `env:` keys, not from what a previous step exported. The receipt travels with
+          # the module so the version it was stamped with can be compared without this checkout.
+          path: |
+            ${{ inputs.pair_kmi || 'android15-6.6' }}_kernelsu${{ env.FLAVOR_SUFFIX }}-${{ inputs.target_id }}-kdp.ko
+            module-version.txt
           if-no-files-found: error
 
   pair-ksud:
@@ -599,6 +608,21 @@ jobs:
           cargo build --release --locked --target aarch64-linux-android $CARGO_ARGS
           find . -type f -name ksud -path '*/aarch64-linux-android/release/*' -exec file {} \;
 
+      - name: The daemon and the module have to report one version
+        run: |
+          # Both halves derive the same number - 30000 + the commit count of the tree they are built
+          # in - in two jobs, from two clones, and this is the only place the two are compared. Three
+          # things are compared: the module's own receipt, the VERSION_CODE/VERSION_NAME the build
+          # script wrote into this build's OUT_DIR, and the string the daemon binary carries.
+          binary=$(find KernelSU -type f -name ksud -path '*/aarch64-linux-android/release/*' | head -1)
+          python3 tools/check_pair_version.py \
+            --module-receipt /tmp/pair/module-version.txt \
+            --daemon-tree KernelSU \
+            --daemon-build-dir KernelSU/target \
+            --daemon-binary "$binary" \
+            --ref "${{ env.KSU_REF }}" \
+            --receipt daemon-version.txt
+
       - name: Name it the way the feed serves it
         env:
           TARGET_ID: ${{ inputs.target_id }}
@@ -615,7 +639,11 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: pair-ksud-${{ env.FLAVOR }}-${{ inputs.target_id }}
-          path: ksud${{ env.FLAVOR_SUFFIX }}-${{ inputs.target_id }}-kdp
+          # The receipt is what the publish job re-checks against the module's, since by then neither
+          # checkout exists.
+          path: |
+            ksud${{ env.FLAVOR_SUFFIX }}-${{ inputs.target_id }}-kdp
+            daemon-version.txt
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------------------------
@@ -664,12 +692,32 @@ jobs:
           # blob, and the pairs that run on devices today do not contain it verbatim either.
           python3 tools/verify_pair.py --module "$module" --daemon "$daemon" --release "$RELEASE"
 
+      - name: Both halves have to carry one version
+        run: |
+          # The receipts are the half of the check that survives the build jobs: the numbers, the
+          # commits they were built at, and the name the daemon was stamped with, held against the
+          # tag this run asked for. The exact-tag assertion was made where the daemon was built, and
+          # this says so rather than pretending to make it again. The receipts stay in place for the
+          # feed step below, which names the entry from the same fact.
+          daemon="kernelsu/ksud${{ env.FLAVOR_SUFFIX }}-${{ inputs.target_id }}-kdp"
+          python3 tools/check_pair_version.py \
+            --module-receipt kernelsu/module-version.txt \
+            --daemon-receipt kernelsu/daemon-version.txt \
+            --daemon-binary "$daemon" \
+            --ref "${{ env.KSU_REF }}"
+
       - name: Point the feed at the pair
         env:
           MIGRATE: ${{ inputs.migrate }}
         run: |
           daemon="ksud${{ env.FLAVOR_SUFFIX }}-${{ inputs.target_id }}-kdp"
-          args=(--repo . --daemon "$daemon" --artifact "kernelsu/$daemon" --version "${{ env.KSU_REF }}"
+          # The tag comes from the module's receipt, not from the input, so the payload id's version
+          # suffix and the display name are the same fact the two halves were stamped with - which the
+          # step above has just held both of them to. An input that disagreed would have failed there.
+          version=$(sed -n 's/^ref=//p' kernelsu/module-version.txt)
+          test -n "$version" || { echo "::error::the module receipt names no ref"; exit 1; }
+          echo "the entry will be named for $version"
+          args=(--repo . --daemon "$daemon" --artifact "kernelsu/$daemon" --version "$version"
                 --url-prefix "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}")
           if [ -n "$MIGRATE" ]; then
             args+=(--migrate)
@@ -680,6 +728,10 @@ jobs:
       - name: Commit
         run: |
           files="kernelsu support/targets-v3.json"
+          # The receipts are build evidence for the checks above, not artifacts: the app reads the
+          # daemon and the feed, and nothing reads these. Removed before anything is staged, so they
+          # cannot be committed by accident.
+          rm -f kernelsu/*-version.txt
           if git diff --quiet -- $files; then
             echo "Nothing changed; the feed already serves this pair."
             exit 0

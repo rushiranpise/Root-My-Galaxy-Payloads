@@ -175,6 +175,35 @@ not `KSU_VERSION_TAG`, whose own fallback branch is `v0.0.1`.
 The `v3.3.0` patch keeps its line. That file is the record of what its pair was built from, and an unread
 `:=` changes nothing.
 
+### The other half of that number
+
+The daemon derives its own version the same way, one file over: `userspace/ksud/build.rs` reads
+`git rev-list --count HEAD` of the checkout it compiles in and writes `30000 + count` as `VERSION_CODE`,
+with `VERSION_NAME` from `git describe --tags --always`. On one commit the two halves therefore agree by
+construction — which is exactly why nothing compared them. They are built by two different jobs, from two
+different clones, and the job that publishes them has neither, so a pair could carry one number in its
+module and another in its daemon, and nothing would say so:
+
+- `ksu_ref` may be a branch, resolved twice minutes apart, so the module is built at one commit and the
+daemon stamps another;
+- a commit past the tag leaves `Kbuild` naming the nearest tag (`v3.4.0`) while `build.rs` names
+`3.4.0-4-g1a879d6a`, and the feed is named from the ref — three names for one build;
+- a shallow or tagless checkout takes `Kbuild`'s fallback of 1, or `build.rs`'s of `(0, "0.0.0")`, and the
+app reads the second as *no KernelSU at all*.
+
+`tools/check_pair_version.py` refuses each of those, and the pair is compared three times over: the
+module's receipt (written beside the module by `check_kernel_version.py`, and travelling in the same
+artifact), the `VERSION_CODE`/`VERSION_NAME` the build script wrote into the daemon's `OUT_DIR`, and the
+name the daemon binary actually carries. The feed entry is then named from the tag the check verified
+rather than from the input, so the payload id's version suffix and the display name are the same fact the
+two artifacts were stamped with. The receipts are removed before anything is staged: they are evidence,
+not artifacts, and nothing reads them at runtime.
+
+At publish time the checkouts are gone and the check runs again on the two receipts, which is weaker by
+construction — an exact tag cannot be re-established from a receipt — and the tool prints that it is
+doing exactly that. Its self-test is the decision table, so each of the three failures above is a case in
+it (`--self-test`, 12 cases).
+
 ## Building it
 
 The recipe in [`../kernelsu/README.md`](../kernelsu/README.md) applies per KMI, with the 3.3.0 record's
