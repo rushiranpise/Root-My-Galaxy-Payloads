@@ -267,10 +267,18 @@ but then the sheet offers two Next entries for one device and the 3.3.0 one is t
 
 - **Not rebasing onto `main`.** A tag is what the patch keys off and what a published artifact is
   reproducible from.
-- **Not adopting upstream's LKM-injection path in place of our staged handoff.** #1446 loads a boot-image
-  LKM, which is a different problem from late-loading into a running kernel with a daemon staged before
-  the security context changes. If upstream's path ever subsumes ours, that is its own decision and its
-  own record.
+- **Not adopting upstream's LKM-injection path in place of our staged handoff.** `ksud boot-patch-v2`
+  takes a boot image and an output path, decompresses the kernel, recovers kallsyms and BTF from the raw
+  Image, links a bootstrap into a kernel text cave, rewrites the `bl` call site in `kernel_init()` that
+  reaches it, appends a capsule holding the module with its fixups already resolved, and repacks the
+  image. The only thing it writes is that image (the single `write_all` in its 3,172 lines; it never
+  mentions `/data/adb`, a daemon, or an install), so it does not do what the handoff does — it removes
+  the situation the handoff exists for, at the price of flashing a boot image, which needs an unlocked
+  bootloader. Our devices are locked; this app's own *Protect image partitions* says as much, that
+  keeping the image partitions read-only "blocks flashing images from the phone and KernelSU installs
+  that patch boot." If upstream ever ships the same injection without a flash in front of it — entering
+  the patched image some other way — that becomes worth a fresh look, because text rewritten into the
+  image is never written at runtime, which is what Samsung's EL2 protection refuses us.
 - **Not keeping the `KSU_VERSION_FALLBACK` hunk.** The number belongs to the tag.
 - **Not publishing anything.** See the status line at the top.
 - **Not touching the tiann leg.** It is still `v3.3.0` and its record is unchanged.
