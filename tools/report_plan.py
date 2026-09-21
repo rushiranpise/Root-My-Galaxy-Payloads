@@ -20,10 +20,34 @@ import json
 import os
 
 
+def named(pair: dict) -> str:
+    """A pair's KMI, with the DDK image beside it when the name and the image are not the same.
+
+    They differ wherever the published artifact carries the kernel release (`android13-5.15.189`)
+    while the image is per family (`android13-5.15`). Both are worth seeing here: the name is what
+    a device downloads, and the image is the half that cannot be chosen wrongly.
+    """
+    family = pair.get("ddk_kmi")
+    if not family or family == pair.get("kmi"):
+        return str(pair.get("kmi") or "?")
+    return f"{pair['kmi']} (ddk {family})"
+
+
 def markdown(plan: dict) -> str:
     lines: list[str] = []
     pairs = plan.get("pairs", [])
     lines.append(f"### Rebuilt by this run\n\n{len(pairs)} pair(s) the feed serves.")
+
+    served = [pair for pair in pairs if pair.get("ddk_kmi") != pair.get("kmi")]
+    if served:
+        lines.append("\nThe image a pair builds in is the KMI family, which is not always the name it is")
+        lines.append("published under:\n")
+        lines.append("| pair | artifact KMI | build image |")
+        lines.append("| --- | --- | --- |")
+        for pair in served:
+            lines.append(
+                f"| `{pair['targetId']}` | `{pair['kmi']}` | `{pair['ddk_kmi']}` |"
+            )
 
     if plan.get("migrations"):
         lines.append("\n### Ready for a pair of their own\n")
@@ -33,7 +57,7 @@ def markdown(plan: dict) -> str:
         lines.append("| --- | --- | --- | --- |")
         for item in plan["migrations"]:
             lines.append(
-                f"| `{', '.join(item['payloadIds'])}` | `{item['kmi']}` "
+                f"| `{', '.join(item['payloadIds'])}` | `{named(item)}` "
                 f"| `{item['release']}` | `{item['target_daemon']}` |"
             )
 

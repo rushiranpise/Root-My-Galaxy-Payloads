@@ -11,7 +11,9 @@ name: Upstream KernelSU
 #      decision rather than a merge, and that one opens an issue carrying the merged hunks.
 #   2. **A pair for every target the feed serves.** `tools/pairs.py` derives that list from the
 #      feed and the artifacts already published, so a device port is enough to have it rebuilt.
-#      Each pair is built by `ksu-build.yml`, which then publishes it.
+#      Each pair is built by `ksu-build.yml`, which then publishes it. That derivation is the only
+#      thing that knows which DDK image a pair builds in - a published name may carry the kernel
+#      release while the image is per family - so it is passed on rather than re-derived per job.
 #   3. **The feed entry that serves it** - url, size, digest, and the KernelSU version its payload
 #      id and display name carry - which that workflow commits.
 #
@@ -256,7 +258,12 @@ jobs:
     with:
       flavor: ${{ matrix.pair.flavor }}
       ksu_ref: ${{ matrix.pair.ksu_ref }}
-      kmi: ${{ matrix.pair.kmi }}
+      # A pair has two KMI names and they are not interchangeable. `pair_kmi` is what the artifact
+      # is published as, which is the name the devices already know; `ddk_kmi` is the image the
+      # build runs in, which the DDK publishes per family and never per release. The compile-check
+      # matrix takes an array of the family, because it becomes an image reference too.
+      kmi: ${{ format('["{0}"]', matrix.pair.ddk_kmi) }}
+      ddk_kmi: ${{ matrix.pair.ddk_kmi }}
       target_id: ${{ matrix.pair.targetId }}
       target_release: ${{ matrix.pair.release }}
       pair_kmi: ${{ matrix.pair.kmi }}

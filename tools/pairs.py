@@ -36,6 +36,13 @@ VERMAGIC = re.compile(rb"vermagic=([^ \x00]+)")
 MODULE = re.compile(
     r"^(?P<kmi>android\d+-\d+\.\d+(?:\.\d+)?)_kernelsu(?P<suffix>-next)?-(?P<target>.+?)(?:-kdp)?\.ko$"
 )
+# The DDK publishes one image per KMI *family* - `android13-5.15`, `android15-6.6` - and never per
+# release, while a module may be named with either. `android13-5.15.189_kernelsu-dm2q-...` is a
+# published name, so the release has to come off before the name is used as an image reference: the
+# reference is `<family>-<ddk_release>`, and a tag carrying the release cannot exist. The failure
+# that causes is a container pull before any step runs, which reads as a missing manifest rather
+# than as a tag this repository asked for by mistake.
+DDK_KMI = re.compile(r"^(?P<family>android\d+-\d+\.\d+)")
 # `ksud[-next]-<target>-kdp`.
 DAEMON = re.compile(r"^ksud(?P<suffix>-next)?-(?P<target>.+?)-kdp$")
 # The version a payload id carries: `pa3q-S938USQSCCZF9-ksu330`.
@@ -63,6 +70,17 @@ def version_code(tag: str) -> str | None:
 
 
 RELEASE_TEXT = re.compile(r"\b(\d+\.\d+\.\d+-android\d+-[\w.-]+)")
+
+
+def ddk_family(kmi: str | None) -> str | None:
+    """The DDK image a KMI belongs to: the family, without the release a module name may carry.
+
+    Only ever used for the image reference. The name a pair is published under keeps whatever the
+    device's modules are already named, because that name is also what the import diff fetches and
+    what the feed serves.
+    """
+    match = DDK_KMI.match(kmi) if kmi else None
+    return match.group("family") if match else None
 
 
 def module_release(path: str) -> str | None:
@@ -93,6 +111,14 @@ def documented_release(repo: str, build: str) -> str | None:
         if found:
             return found.group(1)
     return None
+
+
+def named(pair: dict) -> str:
+    """How a pair reads in a report: its name, and the image when the two are not the same."""
+    family = pair.get("ddk_kmi")
+    if not family or family == pair.get("kmi"):
+        return str(pair.get("kmi") or "?")
+    return f"{pair['kmi']} (ddk {family})"
 
 
 def _url(entry: dict, key: str) -> str:
@@ -147,7 +173,10 @@ def plan(repo: str, feed: str = "support/targets-v3.json") -> dict:
             # The normal case: the pair already published carries the release to reproduce.
             published[key] = {
                 "targetId": target,
+                # What the artifact is called, and separately what the build runs in. They differ
+                # wherever the published name carries the kernel release.
                 "kmi": kmi,
+                "ddk_kmi": ddk_family(kmi),
                 "release": release,
                 "flavor": flavour,
                 "module": module_name,
@@ -180,6 +209,7 @@ def plan(repo: str, feed: str = "support/targets-v3.json") -> dict:
                 {
                     "targetId": candidate_target,
                     "kmi": kmi_from_release,
+                    "ddk_kmi": ddk_family(kmi_from_release),
                     "release": documented,
                     "flavor": flavour,
                     # The daemon this entry has to move to, which the build produces: a shared pair
@@ -232,8 +262,68 @@ def plan(repo: str, feed: str = "support/targets-v3.json") -> dict:
     }
 
 
+# Every KMI this repository has ever published a module under, and the image each belongs to.
+# The four `5.15` names are the ones that could not be rebuilt: their release was being used as
+# the image tag, and there is no `android13-5.15.189-*` for the registry to serve.
+DDK_FAMILIES = {
+    "android12-5.10": "android12-5.10",
+    "android13-5.15": "android13-5.15",
+    "android13-5.15.153": "android13-5.15",
+    "android13-5.15.189": "android13-5.15",
+    "android14-5.15": "android14-5.15",
+    "android14-6.1": "android14-6.1",
+    "android15-6.6": "android15-6.6",
+    "android16-6.12": "android16-6.12",
+    "android17-6.18": "android17-6.18",
+}
+
+
+def self_test() -> int:
+    """The derivation, checked without needing a registry or a rebuild."""
+    failures = 0
+
+    for kmi, expected in DDK_FAMILIES.items():
+        actual = ddk_family(kmi)
+        if actual != expected:
+            print(f"  {kmi}: expected the {expected} image, got {actual}")
+            failures += 1
+
+    # A name with no `android<major>-<x>.<y>` prefix is not a KMI, and guessing one from it would
+    # send the build to an image chosen by accident.
+    for kmi in (None, "", "android13", "13-5.15", "5.15.189", "android-5.15"):
+        if ddk_family(kmi) is not None:
+            print(f"  {kmi!r}: expected no image, got {ddk_family(kmi)}")
+            failures += 1
+
+    # The published shape: a family is two components, and every module name in this repository
+    # resolves to one. A name that kept its release is the defect this exists to prevent.
+    for name in sorted(_published_module_names()):
+        match = MODULE.match(name)
+        if not match:
+            print(f"  {name}: not a module name this repository publishes")
+            failures += 1
+            continue
+        family = ddk_family(match.group("kmi"))
+        if family not in DDK_FAMILIES.values():
+            print(f"  {name}: resolves to {family}, which no DDK image is published under")
+            failures += 1
+
+    print(f"self-test: {len(DDK_FAMILIES)} KMI name(s), {len(_published_module_names())} module(s), {failures} failure(s)")
+    return 1 if failures else 0
+
+
+def _published_module_names() -> list[str]:
+    """The module names in this checkout, which is where the names in use are written down."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    artifacts = os.path.join(os.path.dirname(here), "kernelsu")
+    if not os.path.isdir(artifacts):
+        return []
+    return [name for name in os.listdir(artifacts) if name.endswith(".ko")]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--self-test", action="store_true", help="check the KMI derivation and stop")
     parser.add_argument("--repo", default=".", help="payload repository root")
     parser.add_argument("--feed", default="support/targets-v3.json")
     parser.add_argument("--json", action="store_true", help="print the whole plan as JSON")
@@ -242,6 +332,9 @@ def main() -> int:
     parser.add_argument("--with-migrations", action="store_true", help="include entries ready for a pair of their own")
     parser.add_argument("--write", metavar="PATH", help="write the plan where the workflow can read it")
     arguments = parser.parse_args()
+
+    if arguments.self_test:
+        return self_test()
 
     derived = plan(arguments.repo, arguments.feed)
 
@@ -258,7 +351,11 @@ def main() -> int:
             rows.append(
                 {
                     "targetId": pair["targetId"],
+                    # `kmi` names the artifact; `ddk_kmi` is the image the build runs in. A caller
+                    # that puts the first where the second belongs asks the registry for a tag that
+                    # cannot exist.
                     "kmi": pair["kmi"],
+                    "ddk_kmi": pair["ddk_kmi"],
                     "release": pair["release"],
                     "flavor": pair["flavor"],
                     # Empty unless this run is moving the entries onto the new pair, because moving
@@ -275,6 +372,7 @@ def main() -> int:
                 "target_id": pair["targetId"],
                 "target_release": pair["release"],
                 "kmi": pair["kmi"],
+                "ddk_kmi": pair["ddk_kmi"],
                 "flavor": pair["flavor"],
                 "daemon": pair["daemon"],
                 "payload_ids": ",".join(pair["payloadIds"]),
@@ -293,7 +391,7 @@ def main() -> int:
     for pair in derived["pairs"]:
         served = len(pair["payloadIds"])
         print(
-            f"  {pair['flavor']:14s} {pair['targetId']:24s} {pair['kmi']:18s} "
+            f"  {pair['flavor']:14s} {pair['targetId']:24s} {named(pair):22s} "
             f"{pair['release']:56s} serves {served} entr{'y' if served == 1 else 'ies'}"
         )
     if derived["migrations"]:

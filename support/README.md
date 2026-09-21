@@ -38,6 +38,13 @@ the artifacts already in [`../kernelsu/`](../kernelsu/) - a release is read out 
 of the module being replaced, so a rebuild claims exactly what the module users are running
 claims, and nothing has to be typed in by hand.
 
+A pair has two KMI names and they are not interchangeable. The artifact keeps the name the device's
+modules already use, which for the 5.15 ports carries the kernel release (`android13-5.15.189`),
+while the DDK publishes its images per family (`android13-5.15`) and never per release. Both are
+derived from the same module name and passed on separately, and `ksu-build.yml` checks its image
+exists before pulling it - a job's container is created before any of its steps run, so a tag that
+was never published is otherwise a failed job about a missing manifest rather than about the KMI.
+
 What that leaves for a person, and why:
 
 - **A rebase that conflicts.** A KernelSU release that rewrites the code the Samsung delta

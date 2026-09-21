@@ -61,10 +61,15 @@ on:
         type: string
         default: ''
       pair_kmi:
-        description: 'KMI for the pair build'
+        description: 'KMI for the pair build, as the published artifact names it'
         required: false
         type: string
         default: 'android15-6.6'
+      ddk_kmi:
+        description: 'KMI whose DDK image the pair builds in; a family, e.g. android13-5.15. Empty uses pair_kmi'
+        required: false
+        type: string
+        default: ''
   workflow_dispatch:
     inputs:
       flavor:
@@ -99,9 +104,13 @@ on:
         required: false
         default: ''
       pair_kmi:
-        description: 'KMI for the pair build'
+        description: 'KMI for the pair build, as the published artifact names it'
         required: false
         default: 'android15-6.6'
+      ddk_kmi:
+        description: 'KMI whose DDK image the pair builds in; a family, e.g. android13-5.15. Empty uses pair_kmi'
+        required: false
+        default: ''
       publish:
         description: 'Commit the pair into kernelsu/ and point the feed at it'
         required: false
@@ -352,6 +361,56 @@ jobs:
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------------------------
+  # The image the pair builds in, before anything is pulled into it.
+  #
+  # A job's container is created before any of its steps run, so an image reference that does not
+  # exist is not a failed step with a message - it is a job that dies on `manifest unknown`, which
+  # reads as a registry problem and costs a pull to learn. The reference is `<family>-<release>`,
+  # and a KMI that carries the kernel release makes a tag that was never published, so this names
+  # the input that chose it and lists the families that do exist at that release.
+  # ---------------------------------------------------------------------------------------------
+  ddk-image:
+    name: ddk image (${{ inputs.ddk_kmi || inputs.pair_kmi || 'android15-6.6' }}, ${{ inputs.ddk_release || '20260828' }})
+    # The same condition as the job it guards: nothing else in this workflow needs an image.
+    if: inputs.target_release != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: It exists
+        # Every input is read through `env` rather than written into the script, so the shell sees
+        # values and not expressions - which is also what lets this step be rehearsed by hand.
+        env:
+          IMAGE_KMI: ${{ inputs.ddk_kmi || inputs.pair_kmi || 'android15-6.6' }}
+          DDK_RELEASE: ${{ inputs.ddk_release || '20260828' }}
+          CHOSEN_BY: ddk_kmi=${{ inputs.ddk_kmi }} pair_kmi=${{ inputs.pair_kmi }}
+        run: |
+          set -eu
+          repository="ylarod/ddk-min"
+          tag="${IMAGE_KMI}-${DDK_RELEASE}"
+          echo "image: ghcr.io/${repository}:${tag}"
+          echo "chosen by: ${CHOSEN_BY:-not recorded}"
+
+          # An anonymous token is enough: these images are public, and a private one would answer
+          # 401 rather than 404, which the message below distinguishes.
+          token=$(curl -fsS --max-time 30 \
+            "https://ghcr.io/token?scope=repository:${repository}:pull&service=ghcr.io" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')
+          code=$(curl -s --max-time 30 -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $token" \
+            -H 'Accept: application/vnd.oci.image.index.v1+json' \
+            "https://ghcr.io/v2/${repository}/manifests/${tag}")
+          echo "manifest -> HTTP $code"
+          if [ "$code" = "200" ]; then
+            exit 0
+          fi
+
+          echo "::error::ghcr.io/${repository}:${tag} cannot be pulled (HTTP $code), so this pair cannot be built. The reference is <kmi family>-<ddk release>: a KMI that keeps the kernel release - android13-5.15.189 - is not a family and needs android13-5.15, and a release the DDK never published has no tag at all."
+          echo "families published at ${DDK_RELEASE}:"
+          curl -fsS --max-time 30 -H "Authorization: Bearer $token" \
+            "https://ghcr.io/v2/${repository}/tags/list" \
+            | tr ',' '\n' | grep -- "-${DDK_RELEASE}" | tr -d '\"[]{}' | sed 's/^ */  /' || true
+          exit 1
+
+  # ---------------------------------------------------------------------------------------------
   # The publishable pair, for one target.
   #
   # A module the feed can serve has to report the *target's* kernel release: these devices run
@@ -369,9 +428,10 @@ jobs:
     # `inputs` is empty there and the pair is skipped, which is the behaviour the event check used
     # to provide, while a call and a dispatch both reach it with a target filled in.
     if: inputs.target_release != ''
+    needs: ddk-image
     runs-on: ubuntu-latest
     container:
-      image: ghcr.io/ylarod/ddk-min:${{ inputs.pair_kmi || 'android15-6.6' }}-${{ inputs.ddk_release || '20260828' }}
+      image: ghcr.io/ylarod/ddk-min:${{ inputs.ddk_kmi || inputs.pair_kmi || 'android15-6.6' }}-${{ inputs.ddk_release || '20260828' }}
       options: --privileged
     steps:
       - name: Checkout payloads
