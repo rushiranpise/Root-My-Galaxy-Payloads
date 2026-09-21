@@ -5,17 +5,19 @@ name: Upstream KernelSU
 # A KernelSU release needs three things done, and this does all three without a person:
 #
 #   1. **A patch for the new tag.** The Samsung delta is carried as a patch keyed by tag, so a
-#      release nobody has rebased onto cannot build at all. This tries the newest patch for the
-#      flavour at the new tag: when the hunks still apply it commits the new patch, and when they
-#      do not it opens an issue carrying the rebase's own output and stops there.
+#      release nobody has rebased onto cannot build at all. `tools/rebase_patch.py` carries the
+#      newest patch forward: unchanged, or by three-way merge, or by resolving the conflicts where
+#      each side only added lines. A conflict where a side changed a line the other also had is a
+#      decision rather than a merge, and that one opens an issue carrying the merged hunks.
 #   2. **A pair for every target the feed serves.** `tools/pairs.py` derives that list from the
 #      feed and the artifacts already published, so a device port is enough to have it rebuilt.
 #      Each pair is built by `ksu-build.yml`, which then publishes it.
 #   3. **The feed entry that serves it** - url, size, digest, and the KernelSU version its payload
 #      id and display name carry - which that workflow commits.
 #
-# Nothing is published until the rebase is clean. The patch is the one part of this that is not
-# mechanical, and it is what a reviewer should read when a release arrives.
+# Nothing is published until the rebase lands. What a merge resolved is listed in the run's own
+# summary, because a resolved conflict is a decision the repository made and a reviewer should be
+# able to read it; a conflict a merge cannot settle is what reaches the issue instead.
 
 on:
   schedule:
@@ -115,7 +117,10 @@ jobs:
             echo "Carrying $previous forward onto $tag"
 
             rm -rf /tmp/ksu
-            git clone --quiet --filter=blob:none --no-checkout "https://github.com/$repo" /tmp/ksu
+            # No blob filter, deliberately. A three-way merge reads the patch's own ancestor, and a
+            # partial clone refuses to (`repository lacks the necessary blob`); a full clone of this
+            # repository is 26 MB and takes a few seconds, which is nothing next to what it saves.
+            git clone --quiet --no-checkout "https://github.com/$repo" /tmp/ksu
             git -C /tmp/ksu checkout --quiet "refs/tags/$tag"
 
             # Nothing else is touched before the patch is tried. The `Kernel-SU` organisation being
@@ -124,17 +129,28 @@ jobs:
             # here: the patch is a diff of the tag as the project published it, and a rewritten
             # lockfile inside it would collide with the build's own rewrite.
 
-            if git -C /tmp/ksu apply --check "$PWD/$previous" 2>/tmp/rebase.log; then
-              git -C /tmp/ksu apply "$PWD/$previous"
-              git -C /tmp/ksu diff > "$patch.tmp"
-              mv "$patch.tmp" "$patch"
-              echo "Clean rebase: $previous applies to $tag unchanged."
+            # Applies-with-fallback: the patch onto the tag, then a three-way merge, then this
+            # repository's own conflicts resolved. Exit 2 is `a person has to decide`, and anything
+            # else is this tool failing rather than a release that needs work.
+            set +e
+            python3 tools/rebase_patch.py --tree /tmp/ksu --patch "$PWD/$previous" \
+              --out "$patch" --report /tmp/rebase-report.md >/tmp/rebase.log 2>&1
+            rebase_code=$?
+            set -e
+            cat /tmp/rebase.log
+            { echo "## $flavor onto $tag"; cat /tmp/rebase-report.md; echo; } >> "$GITHUB_STEP_SUMMARY"
+
+            if [ "$rebase_code" = 0 ]; then
               python3 -c "import json,sys; p=sys.argv[1]; d=json.load(open('/tmp/refs.json')); d[sys.argv[2]]=p; json.dump(d,open('/tmp/refs.json','w'))" "$tag" "$flavor"
-            else
-              echo "::warning::$previous does not apply to $tag"
+            elif [ "$rebase_code" = 2 ]; then
+              echo "::warning::$previous cannot be rebased onto $tag without a decision"
               python3 tools/rebase_issue.py --repo "$GITHUB_REPOSITORY" --flavor "$flavor" \
                 --tag "$tag" --upstream "$repo" --previous "$previous" --patch "$patch" \
-                --log /tmp/rebase.log
+                --log /tmp/rebase-report.md
+            else
+              cat /tmp/rebase-report.md >&2
+              echo "::error::the rebase tool failed on $tag (exit $rebase_code)"
+              exit 1
             fi
             echo "::endgroup::"
           done
@@ -153,7 +169,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add kernelsu/patches
           git commit -q -m "build(ksu): rebase the Samsung patches onto the latest releases" \
-            -m "Each patch applies unchanged to the new tag; this records the same delta against it."
+            -m "Each patch carries the same delta onto the new tag; where carrying it needed a merge, the run's summary lists the files and what was resolved in them."
           git pull --rebase --autostash
           git push
 

@@ -10,36 +10,57 @@ and updated rather than reopened when the same release fails again the next nigh
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import os
+import re
 import subprocess
 import sys
 
-UPGRADE_DOC = "docs/KERNELSU-3.3.0-UPGRADE.md"
+
+def newest_upgrade_doc(repo: str) -> str | None:
+    """The latest upgrade write-up, which is where the last rebase's conflicts were recorded.
+
+    Sorted by the version in the name rather than by the name: `KERNELSU-3.10.0` sorts before
+    `KERNELSU-3.3.0` as text, and pointing a reader at the older of the two is the one thing this
+    reference must not do.
+    """
+    found = glob.glob(os.path.join(repo, "docs", "KERNELSU-*-UPGRADE.md"))
+
+    def version(path: str) -> tuple[int, ...]:
+        match = re.search(r"KERNELSU-(\d+(?:\.\d+)*)-UPGRADE", os.path.basename(path))
+        return tuple(int(part) for part in match.group(1).split(".")) if match else (0,)
+
+    return os.path.relpath(max(found, key=version), repo).replace(os.sep, "/") if found else None
 
 
-def body(flavor: str, tag: str, upstream: str, previous: str, patch: str, log: str) -> str:
+def body(flavor: str, tag: str, upstream: str, previous: str, patch: str, log: str, doc: str | None) -> str:
+    background = (
+        f"The conflicts an earlier rebase hit, and how each was resolved, are written up in `{doc}`"
+        if doc
+        else "`docs/` holds the write-ups of earlier rebases"
+    )
     return "\n".join(
         [
-            f"The Samsung patch does not apply to `{tag}` of `{upstream}`.",
+            f"The Samsung patch cannot be rebased onto `{tag}` of `{upstream}` on its own.",
             "",
-            f"The newest patch for this flavour (`{previous}`) was tried against the new tag and the",
-            "hunks below did not land. Nothing was published: every pair in the feed is unchanged,",
-            f"and no pair can be rebuilt against `{tag}` until a new patch exists at `{patch}`.",
+            f"The newest patch for this flavour (`{previous}`) was carried forward and a conflict",
+            "below is one no merge may settle: a side changes a line the ancestor had, so the two",
+            "sides are alternatives rather than additions. Nothing was published - every pair in the",
+            f"feed is unchanged - and no pair can be rebuilt against `{tag}` until a patch exists at",
+            f"`{patch}`.",
             "",
-            "This is the part of a KernelSU bump that is not mechanical. The five conflicts the",
-            f"v3.3.0 rebase hit, and how each was resolved, are written up in `{UPGRADE_DOC}` - a",
-            "release that touches the code the Samsung delta rewrites is the normal case, not a",
-            "surprise.",
+            "The merge is not thrown away: the run left the tag's tree merged, with these conflicts",
+            "marked in it, so this is a decision to make rather than a rebase to do from scratch.",
+            f"{background}; a release that touches the code the Samsung delta rewrites is the normal",
+            "case, not a surprise.",
             "",
             "Once the patch is written and committed, this workflow rebuilds and republishes every",
             "pair on its next run. A manual dispatch runs it immediately.",
             "",
-            f"<details><summary>git apply --check output for {flavor}</summary>",
+            f"<details><summary>What the rebase tool reported for {flavor}</summary>",
             "",
-            "```",
             log.strip()[:20000],
-            "```",
             "",
             "</details>",
             "",
@@ -55,7 +76,8 @@ def main() -> int:
     parser.add_argument("--upstream", required=True)
     parser.add_argument("--previous", required=True, help="the patch that was tried")
     parser.add_argument("--patch", required=True, help="the patch that has to be written")
-    parser.add_argument("--log", required=True, help="file holding the apply output")
+    parser.add_argument("--log", required=True, help="file holding the rebase tool's report")
+    parser.add_argument("--repo-root", default=".", help="checkout to find the upgrade write-ups in")
     parser.add_argument("--dry-run", action="store_true", help="print instead of filing")
     arguments = parser.parse_args()
 
@@ -65,7 +87,15 @@ def main() -> int:
     except OSError:
         log = "(no output was captured)"
 
-    text = body(arguments.flavor, arguments.tag, arguments.upstream, arguments.previous, arguments.patch, log)
+    text = body(
+        arguments.flavor,
+        arguments.tag,
+        arguments.upstream,
+        arguments.previous,
+        arguments.patch,
+        log,
+        newest_upgrade_doc(arguments.repo_root),
+    )
     title = f"KernelSU {arguments.tag} needs a patch for {arguments.flavor}"
 
     if arguments.dry_run:
