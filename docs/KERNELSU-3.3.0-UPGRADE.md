@@ -235,9 +235,14 @@ the same one they met, per profile:
 
 - late-load succeeds and the loader ends in `u:r:ksu:s0` — the security-context transition is what the
   KDP/DEFEX deltas exist for;
-- Manager reports `Working <LKM> [Jailbreak mode]` with a version code of **33000**-and-up, against the
-  **3.3.0 manager APK**; a 32525 manager against a 3.3.0 module is the mismatch signature-block parsing
-  changed underneath;
+- Manager reports `Working <LKM> [Jailbreak mode]` with a version code of **33214**, which is
+  `30000 + 3214` — 3214 being `v3.3.0`'s commit count, and the way both flavours number a release
+  (`kernel/Kbuild`). The number is counted from the tag's own history and is **not** written down in
+  the patch or anywhere else: `tools/check_kernel_version.py` asserts every build's module against
+  the tree it was built from. This used to be a hardcoded fallback, which was dead code in CI — the
+  DDK image has `git` — and wrong by 214 if it had ever run. Validate against the **3.3.0 manager
+  APK**; a 32525 manager against a 3.3.0 module is the mismatch signature-block parsing changed
+  underneath;
 - `su` is granted and survives SELinux enforcing;
 - `ksud --help` still lists `late-load`, and lists `soft-reboot` if the app is to offer it;
 - the app's full chain: exploit, late-load, `su`, and the userspace restart that loads modules.

@@ -249,7 +249,16 @@ jobs:
       - name: Report what was stamped
         run: |
           cd KernelSU
-          echo "git describe: $(git describe --tags 2>/dev/null || echo '(none)')"
+          # `ksud`'s build script derives VERSION_NAME from `git describe`, and a tagless checkout
+          # makes it warn and stamp 0.0.0. That string is what the app reads back as the running
+          # daemon's version and compares against the installed manager, so it is asserted rather
+          # than eyeballed in the log.
+          tag=$(git describe --tags 2>/dev/null || true)
+          echo "git describe: ${tag:-(none)}"
+          if [ -z "$tag" ]; then
+            echo "::error::no tag in this checkout; ksud would stamp 0.0.0"
+            exit 1
+          fi
           binary=$(find . -type f -name ksud -path '*/aarch64-linux-android/release/*' | head -1)
           echo "binary: $binary"
           file "$binary"
@@ -297,6 +306,13 @@ jobs:
           repository: ${{ env.FLAVOR_REPO }}
           ref: ${{ env.KSU_REF }}
           path: KernelSU
+          # The whole history, because the module's version is `30000 + git rev-list --count HEAD`
+          # at the tag (kernel/Kbuild) and a depth-1 clone counts 1. Kbuild does try
+          # `git fetch --unshallow` itself when it sees a shallow clone, but that is a network call
+          # inside the DDK container, and the number it produces is the one the manager pairs itself
+          # with - fetch it here, and assert it below.
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Apply the Samsung patch
         run: |
@@ -305,6 +321,9 @@ jobs:
 
       - name: Build kernelsu.ko
         run: |
+          # `pipefail`, because the output is teed below and the version check reads that file: a
+          # build that failed would otherwise be read as a build that printed no version.
+          set -o pipefail
           cd KernelSU/kernel
           # The DDK's release is not a target's, so this module is a compile check, not something to
           # install. Substituting the target release is a per-profile step - see kernelsu/README.md.
@@ -313,7 +332,7 @@ jobs:
           CONFIG_KSU_SAMSUNG_RKP=y \
           CONFIG_KSU_SAMSUNG_DEFEX=y \
           ${{ matrix.no_patch_text && 'CONFIG_KSU_SAMSUNG_NO_PATCH_TEXT=y' || '' }} \
-          CC=clang make -j"$(nproc)"
+          CC=clang make -j"$(nproc)" 2>&1 | tee /tmp/kbuild.log
 
           echo "=== built ==="
           ls -l kernelsu.ko
@@ -321,6 +340,9 @@ jobs:
           # Keeps the symbol tables the manual-relocation loader needs.
           llvm-strip -d kernelsu.ko
           echo "after strip:"; ls -l kernelsu.ko
+
+      - name: The version has to have come from the tag
+        run: python3 tools/check_kernel_version.py --log /tmp/kbuild.log --tree KernelSU
 
       - name: Upload kernelsu.ko
         uses: actions/upload-artifact@v7
@@ -369,6 +391,10 @@ jobs:
           repository: ${{ env.FLAVOR_REPO }}
           ref: ${{ env.KSU_REF }}
           path: KernelSU
+          # See the compile-check job: the module's version is counted from this history, and this is
+          # the module a device is offered, so the count here is the one that matters.
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Apply the Samsung patch
         run: |
@@ -379,6 +405,7 @@ jobs:
         env:
           TARGET_RELEASE: ${{ inputs.target_release }}
         run: |
+          set -o pipefail
           cd KernelSU/kernel
           : "${KDIR:?the DDK image is expected to set KDIR}"
 
@@ -400,7 +427,7 @@ jobs:
           CONFIG_KSU_SAMSUNG_KDP=y \
           CONFIG_KSU_SAMSUNG_RKP=y \
           CONFIG_KSU_SAMSUNG_DEFEX=y \
-          CC=clang make -j"$(nproc)"
+          CC=clang make -j"$(nproc)" 2>&1 | tee /tmp/kbuild.log
 
           echo "=== vermagic must be the target's ==="
           modinfo ./kernelsu.ko | tee /tmp/modinfo.txt
@@ -410,6 +437,9 @@ jobs:
           fi
 
           llvm-strip -d kernelsu.ko
+
+      - name: The version has to have come from the tag
+        run: python3 tools/check_kernel_version.py --log /tmp/kbuild.log --tree KernelSU
 
       - name: Diff the imports against the device-tested module
         env:
@@ -553,6 +583,14 @@ jobs:
         env:
           KMI: ${{ inputs.pair_kmi || 'android15-6.6' }}
         run: |
+          # The daemon this pair publishes has to carry a version, and `git describe` is where its
+          # build script gets one - the same reason the compile-check job asserts it there.
+          tag=$(git -C KernelSU describe --tags --abbrev=0 2>/dev/null || true)
+          if [ -z "$tag" ]; then
+            echo "::error::no tag in this checkout; the published ksud would report 0.0.0"
+            exit 1
+          fi
+          echo "the daemon will be stamped $tag"
           dest="KernelSU/userspace/ksud/bin/aarch64/${KMI}_kernelsu.ko"
           cp "$(ls /tmp/pair/*.ko)" "$dest"
           ls -l "$dest"
