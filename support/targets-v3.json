@@ -289,8 +289,9 @@
         "size": 130168
       },
       "kernelsu": {
-        "url": "https://raw.githubusercontent.com/BuSung-dev/Root-My-Galaxy-Payloads/main/kernelsu/ksud-dm1q-S911U1UES6DYI3-kdp",
-        "size": 4758792
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-dm1q-S911U1UES6DYI3-kdp",
+        "size": 5112696,
+        "sha256": "4915ae9ab478b13b347db159f49436dfb0d69f0c4df411aea64a282955328ecf"
       }
     },
     {
