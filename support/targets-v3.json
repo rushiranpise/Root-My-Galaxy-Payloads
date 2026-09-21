@@ -302,8 +302,9 @@
         "size": 104128
       },
       "kernelsu": {
-        "url": "https://raw.githubusercontent.com/BuSung-dev/Root-My-Galaxy-Payloads/main/kernelsu/ksud-r12s-S721BXXSCDZF3-kdp",
-        "size": 6419768
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-r12s-S721BXXSCDZF3-kdp",
+        "size": 5110264,
+        "sha256": "69fc94907be32a7cdf8aee1044fb06f9ac4788506b227102d297082842c0e894"
       }
     },
     {
