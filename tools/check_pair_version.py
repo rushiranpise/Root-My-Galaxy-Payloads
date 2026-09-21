@@ -27,9 +27,13 @@ carrying two versions starts there:
 
 What this refuses, it refuses before the feed is pointed at anything. It is given the module's
 receipt (written by `check_kernel_version.py` beside the module it checked), the daemon's own build
-facts, and optionally the `VERSION_CODE`/`VERSION_NAME` the build script wrote and the binary it
-produced - so the answer comes from the same git the two builds read, and is confirmed against the
-artifacts themselves rather than assumed.
+facts, and the daemon binary it produced - so the answer comes from the same git the two builds
+read, and is confirmed against the artifact itself rather than assumed.
+
+One thing it deliberately cannot do is read the number back out of the binary. `build.rs` passes
+it to rustc rather than writing it anywhere - `defs::VERSION_CODE` is `env!` of a `cargo:rustc-env`
+value - and an integer that small has no searchable form in a stripped executable. So the code is
+established from the checkout, and the binary only corroborates the name.
 
 At publish time the checkouts are gone, so it runs again on the two receipts. That is a weaker
 check by construction - an exact tag cannot be re-established from a receipt - and it says so, which
@@ -70,11 +74,6 @@ class Stamp:
     where: str
 
 
-def read_text(path: str) -> str:
-    with open(path, encoding="utf-8", errors="replace") as handle:
-        return handle.read().strip()
-
-
 def read_receipt(path: str) -> dict[str, str]:
     if not os.path.isfile(path):
         # A missing receipt is the shape this takes when a job was skipped or an artifact was not
@@ -104,11 +103,11 @@ def module_stamp(path: str) -> Stamp:
 def check_binary(name: str, binary: str) -> None:
     """The one thing about the binary that can be read where it cannot be run.
 
-    `defs::VERSION_NAME` is `include_str!` of a file the build script wrote, so the name is a
-    compiled-in string and its presence is checkable by looking. Nothing here proves the binary is
-    *this* build of the crate - a dependency's version string could satisfy it - which is why it
-    accompanies the receipt rather than replacing it. The code is an integer immediate and is not
-    searched for: a byte pattern that short would match anything.
+    `defs::VERSION_NAME` is `env!` of a `cargo:rustc-env` value, so the name is a compiled-in string
+    and its presence is checkable by looking. Nothing here proves the binary is *this* build of the
+    crate - a dependency's version string could satisfy it - which is why it accompanies the receipt
+    rather than replacing it. The code is an integer immediate and is not searched for: a byte
+    pattern that short would match anything.
     """
     if not os.path.isfile(binary):
         raise SystemExit(f"no daemon binary at {binary}")
@@ -119,7 +118,7 @@ def check_binary(name: str, binary: str) -> None:
     print(f"  {os.path.basename(binary)} carries {name}")
 
 
-def daemon_stamp(receipt: str | None, tree: str | None, build_dir: str | None, binary: str | None) -> Stamp:
+def daemon_stamp(receipt: str | None, tree: str | None, binary: str | None) -> Stamp:
     """The daemon's version, from the receipt when publishing and from the tree when building.
 
     The tree is preferred because it is where the number actually comes from: `build.rs` reads
@@ -162,40 +161,6 @@ def daemon_stamp(receipt: str | None, tree: str | None, build_dir: str | None, b
 
     version = VERSION_BASE + count
     tag = exact_tag(tree)
-
-    # What the build script actually wrote, which is what `defs::VERSION_CODE` compiles in. A
-    # mismatch here means the crate was built in a different tree from the one handed to this check.
-    if build_dir is not None:
-        if not os.path.isdir(build_dir):
-            raise SystemExit(f"no build directory at {build_dir}")
-        found = sorted(
-            os.path.join(root, name_)
-            for root, _dirs, names in os.walk(build_dir)
-            for name_ in names
-            if name_ in ("VERSION_CODE", "VERSION_NAME")
-        )
-        codes = [path for path in found if os.path.basename(path) == "VERSION_CODE"]
-        if not codes:
-            raise SystemExit(f"no VERSION_CODE under {build_dir}: nothing was built there")
-        if len(codes) > 1:
-            raise SystemExit(f"{len(codes)} VERSION_CODE files under {build_dir}; cannot tell which build is this one")
-        name_path = os.path.join(os.path.dirname(codes[0]), "VERSION_NAME")
-        if not os.path.isfile(name_path):
-            # The build script writes both or neither; one alone means this is not its output.
-            raise SystemExit(f"{name_path} is missing beside VERSION_CODE")
-        written_code = read_text(codes[0])
-        written_name = read_text(name_path)
-        if written_code != str(version):
-            raise SystemExit(
-                f"the build script stamped VERSION_CODE {written_code}, but this checkout is {count} commits\n"
-                f"into its history, which is {version}. The daemon was built in a different tree."
-            )
-        if written_name != name:
-            raise SystemExit(
-                f"the build script stamped VERSION_NAME {written_name!r}, but `git describe` of this\n"
-                f"checkout says {name!r}."
-            )
-        print(f"  build script wrote {written_name} / {written_code} - agrees with {tree}")
 
     if binary is not None:
         check_binary(name, binary)
@@ -412,8 +377,7 @@ def main() -> int:
     parser.add_argument("--module-receipt", help="written by check_kernel_version.py beside the module")
     parser.add_argument("--daemon-tree", help="the checkout the daemon was built in")
     parser.add_argument("--daemon-receipt", help="the daemon's own receipt, when its tree is gone")
-    parser.add_argument("--daemon-build-dir", help="the cargo target dir, to read the VERSION_CODE it wrote")
-    parser.add_argument("--daemon-binary", help="the built daemon, to read the name out of it")
+    parser.add_argument("--daemon-binary", help="the built daemon, to check the name inside it")
     parser.add_argument("--ref", help="the tag this run is building, e.g. v3.4.0")
     parser.add_argument("--receipt", help="write the daemon's receipt where publish can read it")
     arguments = parser.parse_args()
@@ -424,7 +388,7 @@ def main() -> int:
         parser.error("give --module-receipt, or --self-test")
 
     module = module_stamp(arguments.module_receipt)
-    daemon = daemon_stamp(arguments.daemon_receipt, arguments.daemon_tree, arguments.daemon_build_dir, arguments.daemon_binary)
+    daemon = daemon_stamp(arguments.daemon_receipt, arguments.daemon_tree, arguments.daemon_binary)
     ref = arguments.ref or module.ref or None
 
     if arguments.receipt:

@@ -671,14 +671,16 @@ jobs:
       - name: The daemon and the module have to report one version
         run: |
           # Both halves derive the same number - 30000 + the commit count of the tree they are built
-          # in - in two jobs, from two clones, and this is the only place the two are compared. Three
-          # things are compared: the module's own receipt, the VERSION_CODE/VERSION_NAME the build
-          # script wrote into this build's OUT_DIR, and the string the daemon binary carries.
+          # in - in two jobs, from two clones, and this is the only place the two are compared. Two
+          # things are compared: the module's own receipt, and what `git` says about the checkout the
+          # daemon was built in, with the name read back out of the binary it produced.
+          #
+          # Not the build's target directory: `build.rs` hands the number to rustc rather than
+          # writing it down, so there is no file under `KernelSU/target` to compare against.
           binary=$(find KernelSU -type f -name ksud -path '*/aarch64-linux-android/release/*' | head -1)
           python3 tools/check_pair_version.py \
             --module-receipt /tmp/pair/module-version.txt \
             --daemon-tree KernelSU \
-            --daemon-build-dir KernelSU/target \
             --daemon-binary "$binary" \
             --ref "${{ env.KSU_REF }}" \
             --receipt daemon-version.txt
