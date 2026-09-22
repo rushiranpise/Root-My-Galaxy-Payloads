@@ -38,6 +38,24 @@ def markdown(plan: dict) -> str:
     pairs = plan.get("pairs", [])
     lines.append(f"### Rebuilt by this run\n\n{len(pairs)} pair(s) the feed serves.")
 
+    # Which of what this run leaves behind is *the* reason an entry cannot say which KernelSU it
+    # stages, and the app offers a manager to match that version. A daemon that was hand-built before
+    # the build stamped one cannot be given a version by editing the feed, so the honest answer is to
+    # say so and count it rather than leave the reader to infer it from an absent field.
+    unstamped = [pair for pair in pairs if not pair.get("currentVersion")]
+    if unstamped:
+        lines.append("")
+        lines.append(
+            f"{len(pairs) - len(unstamped)} of {len(pairs)} carry a daemon stamped with the version it was "
+            "built from, which is what lets the entries they serve declare one. These were built before "
+            "that was part of the build, and only a rebuild can change it:\n"
+        )
+        for pair in unstamped:
+            served = len(pair.get("payloadIds", []))
+            lines.append(
+                f"- `{pair['targetId']}` - {served} entr{'y' if served == 1 else 'ies'}, daemon carries no version"
+            )
+
     served = [pair for pair in pairs if pair.get("ddk_kmi") != pair.get("kmi")]
     if served:
         lines.append("\nThe image a pair builds in is the KMI family, which is not always the name it is")
@@ -53,12 +71,12 @@ def markdown(plan: dict) -> str:
         lines.append("\n### Ready for a pair of their own\n")
         lines.append("A device port document names these builds, so they can be built - but each entry")
         lines.append("still points at a shared hand-built pair until a run is asked to move it.\n")
-        lines.append("| entry | kmi | release | would move to |")
-        lines.append("| --- | --- | --- | --- |")
+        lines.append("| entry | kmi | release | would move to | what that is |")
+        lines.append("| --- | --- | --- | --- | --- |")
         for item in plan["migrations"]:
             lines.append(
                 f"| `{', '.join(item['payloadIds'])}` | `{named(item)}` "
-                f"| `{item['release']}` | `{item['target_daemon']}` |"
+                f"| `{item['release']}` | `{item['target_daemon']}` | {item.get('note', '')} |"
             )
 
     if plan.get("skipped"):

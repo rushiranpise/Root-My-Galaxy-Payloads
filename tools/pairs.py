@@ -49,6 +49,8 @@ DAEMON = re.compile(r"^ksud(?P<suffix>-next)?-(?P<target>.+?)-kdp$")
 VERSIONED_ID = re.compile(r"^(?P<prefix>.+?)-(?P<flavour>ksun?)(?P<version>\d+)$")
 # A build tree's own release rather than a device's: `6.6.127-4k-g46a034eca005-dirty`.
 BUILD_TREE = re.compile(r"-g[0-9a-f]{7,}(-dirty)?$")
+# The version a pair-built daemon carries: `3.4.0 (uapi: 4)`, which is `ksud -V`'s own answer.
+DAEMON_VERSION = re.compile(rb"(\d+\.\d+\.\d+) \(uapi: \d+\)")
 
 FLAVOURS = {"": "kernelsu", "-next": "kernelsu-next"}
 # `S938USQSCCZF9`: the build id in a payload id or a target id.
@@ -83,6 +85,34 @@ def ddk_family(kmi: str | None) -> str | None:
     return match.group("family") if match else None
 
 
+def kmi_for_release(release: str, published: list[str]) -> str | None:
+    """The KMI a pair built for this release should be named under, or None when there is no such name.
+
+    A device release reads `5.15.189-android13-8-33413713-abS918BXXSAFZF5`: the version is the device's
+    and `android13` is the tree it was built in. Both forms of the name appear in this repository -
+    `android13-5.15` for a whole image, `android13-5.15.189` where one image carries more than one
+    device release - so the form a sibling is already published under wins, and the image form is the
+    fallback. Either resolves to the image the build runs in through `ddk_family`, which is what makes
+    a name usable at all: a name that derives no family is one the registry cannot be asked about.
+
+    This is the difference between an entry that has a port document and no module getting a pair of its
+    own, and it being reported as if nothing were known about it. The release was never the missing
+    part; the name it had to be published under was.
+    """
+    android = re.search(r"-android(\d+)-", release)
+    version = release.split("-")[0]
+    if not android or not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        return None
+    family = f"android{android.group(1)}-{'.'.join(version.split('.')[:2])}"
+    if family not in DDK_FAMILIES:
+        return None
+    exact = f"android{android.group(1)}-{version}"
+    for form in (exact, family):
+        if any(name.startswith(form + "_") for name in published):
+            return form
+    return family
+
+
 def module_release(path: str) -> str | None:
     """The kernel release a built module claims, or None when it carries no vermagic."""
     try:
@@ -91,6 +121,50 @@ def module_release(path: str) -> str | None:
     except OSError:
         return None
     return match.group(1).decode("ascii", "replace") if match else None
+
+
+def daemon_version(path: str) -> str | None:
+    """The KernelSU version a daemon was stamped with, or None when it carries none.
+
+    Read from the binary rather than from the entry that serves it, because this is the one place the
+    fact is written down for an artifact nobody rebuilt: the feed's `version` field is written by the
+    pair job, so an entry the job cannot rebuild has no way to declare one - and a daemon that does not
+    say which KernelSU it is cannot be made to, by any amount of editing.
+
+    A hand-built daemon is the case that matters here: the three that serve the shared pairs were built
+    before the stamp was part of the build, so nothing in this repository states their version.
+    """
+    try:
+        with open(path, "rb") as handle:
+            match = DAEMON_VERSION.search(handle.read())
+    except OSError:
+        return None
+    return match.group(1).decode("ascii", "replace") if match else None
+
+
+def release_missing_reason(payload_id: str, models: list[str], build: str, stamped: str | None) -> str:
+    """Why an entry with no release to copy cannot be rebuilt, naming what would change that.
+
+    Two different situations print the same sentence today, and a maintainer reading it would go
+    looking for the wrong thing. One entry naming a single build is a missing document away from
+    rebuilding - the release is device truth, so somebody holding the phone has to report it. One entry
+    naming a whole series is not: thirty models ship thirty kernels, each pair claims one release, and
+    there is no document that could be written to make one entry into one pair.
+
+    The daemon's own stamp is part of the answer either way, because it decides whether a rebuild is
+    needed at all: an entry whose daemon says `3.3.0` could declare that today, without being rebuilt.
+    """
+    if not build:
+        lead = (
+            f"names {len(models)} model{'s' if len(models) != 1 else ''} whose builds differ, so no "
+            "single release can be claimed - a pair per build, not one entry"
+        )
+    else:
+        first = models[0] if models else "<MODEL>"
+        lead = f"no release recorded for {build}: add docs/{first}-{build}.md with the device's `uname -r`"
+    if stamped:
+        return f"{lead} (its daemon says {stamped}, but a shared pair cannot be replaced in place)"
+    return f"{lead} (and its daemon carries no version, so a rebuild is the only way it can declare one)"
 
 
 def documented_release(repo: str, build: str) -> str | None:
@@ -136,6 +210,14 @@ def plan(repo: str, feed: str = "support/targets-v3.json") -> dict:
     skipped: list[dict] = []
     migrations: list[dict] = []
     entries: list[dict] = []
+    # One 6 MB read per daemon, and several entries share one - which is the whole reason there is a
+    # memo here rather than a call at each use.
+    stamps: dict[str, str | None] = {}
+
+    def stamp(daemon_name: str) -> str | None:
+        if daemon_name not in stamps:
+            stamps[daemon_name] = daemon_version(os.path.join(artifacts, daemon_name))
+        return stamps[daemon_name]
 
     for entry in manifest.get("payloads", []):
         payload_id = entry.get("payloadId", "")
@@ -181,6 +263,9 @@ def plan(repo: str, feed: str = "support/targets-v3.json") -> dict:
                 "flavor": flavour,
                 "module": module_name,
                 "daemon": daemon_name,
+                # What a rebuild moves away from: the version the daemon serving this pair right now
+                # was stamped with, which for a pair that has never been rebuilt is nothing.
+                "currentVersion": stamp(daemon_name),
                 "payloadIds": [],
             }
             continue
@@ -195,16 +280,10 @@ def plan(repo: str, feed: str = "support/targets-v3.json") -> dict:
         candidate_target = target if "-" in target else from_id
         build = candidate_target.split("-", 1)[1] if "-" in candidate_target else ""
         documented = documented_release(repo, build)
-        kmi_from_release = None
-        if documented:
-            android = re.search(r"-android(\d+)-", documented)
-            version = documented.split("-")[0]
-            if android:
-                candidate = f"android{android.group(1)}-{'.'.join(version.split('.')[:2])}"
-                if any(name.startswith(candidate + "_") for name in os.listdir(artifacts)):
-                    kmi_from_release = candidate
+        kmi_from_release = kmi_for_release(documented, os.listdir(artifacts)) if documented else None
 
         if documented and kmi_from_release:
+            own_daemon = f"ksud{'-next' if suffix else ''}-{candidate_target}-kdp"
             migrations.append(
                 {
                     "targetId": candidate_target,
@@ -216,9 +295,16 @@ def plan(repo: str, feed: str = "support/targets-v3.json") -> dict:
                     # cannot be replaced in place, because the artifact is the one four other
                     # entries are still served by.
                     "daemon": daemon_name,
-                    "target_daemon": f"ksud{'-next' if suffix else ''}-{candidate_target}-kdp",
+                    "target_daemon": own_daemon,
+                    # Which of the two shapes this is. An entry already served by its own daemon is a
+                    # pair that was hand-built without a version stamp and with no module beside it, so
+                    # a rebuild is a replacement in place; an entry on a shared artifact is a move.
+                    "note": "its own daemon already, rebuilt in place"
+                    if own_daemon == daemon_name
+                    else "a daemon of its own, replacing the shared one",
                     "payloadIds": [payload_id],
                     "module": None,
+                    "currentVersion": stamp(daemon_name),
                     "source": "a device port document",
                 }
             )
@@ -234,9 +320,15 @@ def plan(repo: str, feed: str = "support/targets-v3.json") -> dict:
             {
                 "payloadId": payload_id,
                 "artifact": module_name,
-                "reason": "a shared hand-built pair, and no device port document names its build"
+                "reason": release_missing_reason(
+                    payload_id,
+                    list(entry.get("models", [])),
+                    build,
+                    stamp(daemon_name),
+                )
                 if not documented
-                else f"a port document gives {documented}, which no published module builds",
+                else f"a port document gives {documented}, which no published module builds"
+                + (f" (its daemon says {stamp(daemon_name)})" if stamp(daemon_name) else ""),
             }
         )
         continue
@@ -278,7 +370,7 @@ DDK_FAMILIES = {
 }
 
 
-def self_test() -> int:
+def self_test(repo: str = ".", feed: str = "support/targets-v3.json") -> int:
     """The derivation, checked without needing a registry or a rebuild."""
     failures = 0
 
@@ -308,7 +400,72 @@ def self_test() -> int:
             print(f"  {name}: resolves to {family}, which no DDK image is published under")
             failures += 1
 
-    print(f"self-test: {len(DDK_FAMILIES)} KMI name(s), {len(_published_module_names())} module(s), {failures} failure(s)")
+    # The name a release publishes under, which is the one thing standing between a documented build
+    # and a pair of its own. The two forms are here because both are in the repository, and the choice
+    # is made by what a sibling already uses rather than by preference.
+    names = sorted(os.listdir(os.path.join(repo, "kernelsu")))
+    release_cases = (
+        ("5.15.189-android13-8-33413713-abS918BXXSAFZF5", "android13-5.15.189"),
+        ("6.6.98-android15-8-g1a2b3c4d5e6f-4k", "android15-6.6"),
+        ("5.15.189", None),
+        ("6.6.98-notanandroidtree", None),
+    )
+    for release, expected in release_cases:
+        actual = kmi_for_release(release, names)
+        if actual != expected:
+            print(f"  {release}: expected {expected!r}, got {actual!r}")
+            failures += 1
+
+    # Why an entry cannot be rebuilt has two shapes, and the report has to tell them apart: one entry
+    # naming a single build is a document away from a pair of its own, and one naming a whole series
+    # never will be. The four ids here are the ones the report actually prints them for.
+    cases = (
+        ("q7q-F966USQU9BZDN", ["SM-F966U", "SM-F966U1"], "F966USQU9BZDN", None, "docs/SM-F966U-F966USQU9BZDN.md"),
+        ("dm3q-S918BXXSAFZF5", ["SM-S918B"], "S918BXXSAFZF5", None, "docs/SM-S918B-S918BXXSAFZF5.md"),
+        ("galaxy-s25-series-2026-06-07", ["SM-S938B"] * 30, "", None, "a pair per build"),
+        ("dm1q-S911U1UES6DYI3", ["SM-S911U1"], "S911U1UES6DYI3", "3.3.0", "its daemon says 3.3.0"),
+    )
+    for payload_id, models, build, stamped, expected in cases:
+        reason = release_missing_reason(payload_id, models, build, stamped)
+        if expected not in reason:
+            print(f"  {payload_id}: expected {expected!r} in the reason, got {reason!r}")
+            failures += 1
+    if release_missing_reason("x", ["SM-S938B"], "", None).count("model") != 1:
+        print("  one model in a series entry still reads as plural")
+        failures += 1
+
+    # The one claim the app acts on: the version the feed declares for an entry has to be the version
+    # in the bytes that entry serves. Where both are readable they must agree, because a rebuild writes
+    # the field from the tag it was made at and stamps the same tag into the daemon.
+    declared = agreed = 0
+    path = os.path.join(repo, feed)
+    if os.path.isfile(path):
+        with open(path, encoding="utf-8") as handle:
+            manifest = json.load(handle)
+        for entry in manifest.get("payloads", []):
+            kernelsu = entry.get("kernelsu")
+            version = (kernelsu or {}).get("version") if isinstance(kernelsu, dict) else None
+            if not version:
+                continue
+            declared += 1
+            name = os.path.basename(_url(entry, "kernelsu"))
+            binary = os.path.join(repo, "kernelsu", name)
+            if not os.path.isfile(binary):
+                continue
+            stamped = daemon_version(binary)
+            if stamped is None:
+                print(f"  {entry.get('payloadId')}: declares {version}, but its daemon carries no version")
+                failures += 1
+            elif stamped.lstrip("v") != str(version).lstrip("v"):
+                print(f"  {entry.get('payloadId')}: declares {version}, daemon says {stamped}")
+                failures += 1
+            else:
+                agreed += 1
+
+    print(
+        f"self-test: {len(DDK_FAMILIES)} KMI name(s), {len(_published_module_names())} module(s), "
+        f"{agreed}/{declared} declaration(s) checked against the daemon, {failures} failure(s)"
+    )
     return 1 if failures else 0
 
 
@@ -334,7 +491,7 @@ def main() -> int:
     arguments = parser.parse_args()
 
     if arguments.self_test:
-        return self_test()
+        return self_test(arguments.repo, arguments.feed)
 
     derived = plan(arguments.repo, arguments.feed)
 
@@ -390,16 +547,20 @@ def main() -> int:
     print(f"pairs the feed serves: {len(derived['pairs'])}")
     for pair in derived["pairs"]:
         served = len(pair["payloadIds"])
+        # The version it carries now, which is what a rebuild would move away from - and, for the ones
+        # that carry none, the reason their entries cannot declare which KernelSU they stage.
+        carries = pair.get("currentVersion") or "no version stamped"
         print(
             f"  {pair['flavor']:14s} {pair['targetId']:24s} {named(pair):22s} "
-            f"{pair['release']:56s} serves {served} entr{'y' if served == 1 else 'ies'}"
+            f"{pair['release']:56s} serves {served} entr{'y' if served == 1 else 'ies'} ({carries})"
         )
     if derived["migrations"]:
         print(f"ready for a pair of their own, once migrated: {len(derived['migrations'])}")
         for item in derived["migrations"]:
+            carries = item.get("currentVersion") or "no version stamped"
             print(
                 f"  {', '.join(item['payloadIds']):34s} {item['kmi']:14s} {item['release']} "
-                f"-> {item['target_daemon']} ({item['source']})"
+                f"-> {item['target_daemon']} ({item['note']}, was {carries})"
             )
     if derived["skipped"]:
         print(f"not rebuildable from here: {len(derived['skipped'])}")
