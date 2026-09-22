@@ -420,19 +420,24 @@ index 0000000..b882f09
 +#endif
 +}
 diff --git a/kernel/core/init.c b/kernel/core/init.c
-index c158df8..39a9521 100644
+index c158df8..6e2ac43 100644
 --- a/kernel/core/init.c
 +++ b/kernel/core/init.c
-@@ -25,6 +25,8 @@
+@@ -25,6 +25,13 @@
  #include "feature/selinux_hide.h"
  #include "feature/sulog.h"
  #include "infra/symbol_resolver.h"
 +#include "ksu_samsung_kdp.h"
 +#include "compat/samsung_defex.h"
++
++// The AVC-spoof hook is armed from on_boot_completed(), and dispatch.c skips that event for a
++// late-loaded module - which is how this delta reaches a locked device. Declared the way
++// boot_event.c declares it, because the function itself lives in extras.c.
++extern void ksu_avc_spoof_late_init(void);
  
  #if defined(__x86_64__)
  #include <asm/cpufeature.h>
-@@ -86,6 +88,7 @@ module_param_named(norc, ksu_no_custom_rc, bool, 0);
+@@ -86,6 +93,7 @@ module_param_named(norc, ksu_no_custom_rc, bool, 0);
  
  int __init kernelsu_init(void)
  {
@@ -440,7 +445,7 @@ index c158df8..39a9521 100644
  #if defined(__x86_64__)
      // If the kernel has the hardening patch, X86_FEATURE_INDIRECT_SAFE must be set 
      if (!boot_cpu_has(X86_FEATURE_INDIRECT_SAFE)) {
-@@ -121,13 +124,28 @@ int __init kernelsu_init(void)
+@@ -121,13 +129,28 @@ int __init kernelsu_init(void)
  		pr_alert("shell is allowed at init!");
  	}
  
@@ -470,7 +475,18 @@ index c158df8..39a9521 100644
  	ksu_syscall_hook_init();
  
  	ksu_feature_init();
-@@ -221,7 +239,9 @@ void __exit kernelsu_exit(void)
+@@ -164,6 +187,10 @@ int __init kernelsu_init(void)
+ 		ksu_file_wrapper_init();
+ 
+ 		ksu_boot_completed = true;
++
++		// What on_boot_completed() does for a module that was present at boot. A late-loaded one
++		// never gets the event, so the phone being past boot here is the cue to arm it.
++		ksu_avc_spoof_late_init();
+ 		track_throne(false);
+ 
+ 		if (!getenforce()) {
+@@ -221,7 +248,9 @@ void __exit kernelsu_exit(void)
  
  	ksu_feature_exit();
  

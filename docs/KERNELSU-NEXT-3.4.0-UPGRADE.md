@@ -178,9 +178,41 @@ matching one, in the order upstream uses. Five lines per patch: a regenerated pa
 before it only in `syscall_hook_manager.c`'s two hunks and their counts.
 
 What that changes, and what it does not: the switch becomes real, because the handler now exists and can
-be read and set. It does not change *when* the kprobe goes in — late init runs regardless of
-registration, so the spoof was already being installed wherever the boot-completed event reaches the
-driver. The difference is that a feature running invisibly becomes one the user can see and turn off.
+be read and set. Nothing about *when* the kprobe goes in changes either way — and that turns out to be a
+second, independent gap, one this delta walks into on every device it roots.
+
+## The event a late-loaded module never gets
+
+`dispatch.c` skips the boot-completed event when the module was loaded after boot, which is the only way
+this delta reaches a locked device, so `on_boot_completed()` never runs for one. It is where the spoof is
+armed:
+
+```c
+ksu_boot_completed = true;
+track_throne(true);
+ksu_selinux_hide_drop_backup_if_unused();
+ksu_avc_spoof_late_init();      // get_sid(), then the slow_avc_audit kprobe
+```
+
+`ksu_avc_spoof_late_init()` is what sets its own `boot_completed` flag, resolves the two SIDs and
+registers the kprobe; until it runs, `disable_spoof` keeps the hook returning immediately. The handler is
+registered and `ksud feature get avc_spoof` reports the compile-time default — `ksu_avc_spoof_enabled` is
+a `static bool = true` in `extras.c` — so the switch reads **enabled** while the feature does nothing. The
+registration fix alone therefore makes the switch real and still leaves it inert on the devices it was
+written for.
+
+The two states look identical in the manager, and one command separates them: toggle **AVC spoofing** off
+and back on, then read the log. A driver whose `boot_completed` is set prints `avc_spoof/get_sid: su_sid:
+…` and `slow_avc_audit spoofing enabled!`; one that only took the flag prints `avc_spoof: set to 1` and
+nothing else. `ksud feature get avc_spoof` cannot tell them apart — what it reports is that flag, not the
+kprobe.
+
+The late-load branch of `kernel/core/init.c` arms it, beside the `ksu_boot_completed = true` it already
+sets. The guard covers this as well: it derives the requirement from the tree's own `on_boot_completed()`
+instead of asserting a call, so a tree whose event arms nothing — the tiann leg, whose feature set has no
+`avc_spoof` at all — is not failed for it, and it reports the rest of the difference without failing on
+it. On the Next trees that report is one name, `ksu_selinux_hide_drop_backup_if_unused()`, which
+upstream's own late path skips too: upstream's call, not a defect this delta introduced.
 
 The tiann leg is untouched, and by evidence rather than by assumption: its 3.3.0
 `ksu_syscall_hook_manager_init` ends at `ksu_setuid_hook_init()` and `ksu_sucompat_init()`, with no
@@ -190,11 +222,14 @@ One consequence of where the fix lives: it reaches a device only through a rebui
 artifacts are what the loader gets, so this changes nothing on a phone until the pair is republished.
 
 A check now runs wherever the patch is applied — `tools/check_rkp_branch.py --tree KernelSU`, in all four
-jobs of the build workflow. It reads the branch out of the patched file and refuses one that is missing
-an `_init` the rest of the function calls, with the two Samsung stand-ins named as the only allowed
-substitutions, and `--self-test` proving it can fail. Run against the previous patch it names
-exactly `ksu_avc_spoof_init()`. Upstream adds to that tail, and the next addition would otherwise be
-dropped the same way — by someone reading a diff rather than by something refusing one.
+jobs of the build workflow. It reads both shortcuts out of the patched files: the early-return branch in
+`syscall_hook_manager.c`, which may not be missing an `_init` the rest of the function calls (the two
+Samsung stand-ins are the only allowed substitutions), and the late-load branch in `init.c`, which must
+do whatever that tree's own `on_boot_completed()` does about the spoof. `--self-test` proves both can
+fail without failing a correct tree. Run against the previous patch the first check names exactly
+`ksu_avc_spoof_init()`; run against a tree patched before this section it names
+`ksu_avc_spoof_late_init()`. Upstream adds to that tail, and the next addition would otherwise be dropped
+the same way — by someone reading a diff rather than by something refusing one.
 
 ## The version number is derived from the tag, not written down
 
