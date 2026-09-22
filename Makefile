@@ -129,9 +129,15 @@ $(APP_STABLE): $(APP_PRELOAD_SRCS) $(TARGET_HEADER) src/offset.h src/common.h sr
 	@test $$(stat -c %s $@) -le $(APP_RELEASE_SIZE)
 	truncate -s $(APP_RELEASE_SIZE) $@
 
+# `APP_QUIET_WINDOW` answers whether this target's app payload is built from the preload chain at
+# all, which is the chain that reads the app's post-boot quiet window. A target built without it - the
+# a53x/ghostlock sources never include `src/preload.c` - has no such variable for CI to look for, so a
+# check that asked every artifact would fail on it. The answer comes off the source list above rather
+# than a list kept beside the workflow, so a target that moves between the two builds moves here too.
 info:
 	@echo "TARGET=$(TARGET)"
 	@echo "APP_TARGET_CFLAGS=$(APP_TARGET_CFLAGS)"
+	@echo "APP_QUIET_WINDOW=$(if $(findstring src/preload.c,$(APP_PRELOAD_SRCS)),yes,no)"
 	@echo "TARGET_CC=$(TARGET_CC)"
 	@echo "PRELOAD=$(PRELOAD)"
 	@echo "APP_PRELOAD=$(APP_PRELOAD)"
