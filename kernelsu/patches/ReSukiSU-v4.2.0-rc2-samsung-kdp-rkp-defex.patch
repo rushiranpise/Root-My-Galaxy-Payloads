@@ -608,7 +608,7 @@ index 944f43f..6f71f52 100644
  // Restore syscall_table[@nr] to its original value recorded by
  // ksu_syscall_table_hook(), and remove the entry from the tracking list.
 diff --git a/kernel/hook/syscall_hook_manager.c b/kernel/hook/syscall_hook_manager.c
-index e7b841f..94dafcd 100644
+index e7b841f..1bccf06 100644
 --- a/kernel/hook/syscall_hook_manager.c
 +++ b/kernel/hook/syscall_hook_manager.c
 @@ -5,6 +5,7 @@
@@ -619,7 +619,7 @@ index e7b841f..94dafcd 100644
  #include <trace/events/syscalls.h>
  
  #include <linux/version.h>
-@@ -21,6 +22,313 @@
+@@ -21,6 +22,319 @@
  #include "hook/setuid_hook.h"
  #include "hook/syscall_hook.h"
  #include "hook/syscall_event_bridge.h"
@@ -808,7 +808,9 @@ index e7b841f..94dafcd 100644
 +
 +    ret = register_kprobe(&samsung_sucompat_execve_kprobe);
 +    if (ret)
-+        goto exit_sucompat;
++        // Nothing to undo but the su_compat handler, and that one has to stay: see the note on the
++        // unwind path below.
++        return ret;
 +
 +    ret = register_kprobe(&samsung_sucompat_newfstatat_kprobe);
 +    if (ret)
@@ -838,8 +840,12 @@ index e7b841f..94dafcd 100644
 +    unregister_kprobe(&samsung_sucompat_newfstatat_kprobe);
 +unregister_execve:
 +    unregister_kprobe(&samsung_sucompat_execve_kprobe);
-+exit_sucompat:
-+    ksu_sucompat_exit();
++    // `ksu_sucompat_exit` is not called on any of these paths, and cannot be: this tree marks it
++    // `__exit`, so a caller living in `.init.text` is a section mismatch modpost refuses outright.
++    // It would also be the wrong thing to do on a load that only failed to register a kprobe: it
++    // takes away the su_compat feature handler that the rest of the module registers its own
++    // syscall paths against. The sucompat stays initialised, and `core/init.c` is where this
++    // flavour exits it.
 +    return ret;
 +}
 +
@@ -933,7 +939,7 @@ index e7b841f..94dafcd 100644
  
  #ifdef CONFIG_KRETPROBES
  
-@@ -126,6 +434,31 @@ void __init ksu_syscall_hook_manager_init(void)
+@@ -126,6 +440,31 @@ void __init ksu_syscall_hook_manager_init(void)
      int ret;
      pr_info("hook_manager: ksu_hook_manager_init called\n");
  
@@ -965,7 +971,7 @@ index e7b841f..94dafcd 100644
  #ifdef CONFIG_KRETPROBES
      syscall_regfunc_rp = init_kretprobe("syscall_regfunc", syscall_regfunc_handler);
      syscall_unregfunc_rp = init_kretprobe("syscall_unregfunc", syscall_unregfunc_handler);
-@@ -157,6 +490,23 @@ void __init ksu_syscall_hook_manager_init(void)
+@@ -157,6 +496,23 @@ void __init ksu_syscall_hook_manager_init(void)
  void __exit ksu_syscall_hook_manager_exit(void)
  {
      pr_info("hook_manager: ksu_hook_manager_exit called\n");

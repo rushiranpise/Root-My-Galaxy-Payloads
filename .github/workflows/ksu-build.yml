@@ -164,6 +164,14 @@ env:
   # the configuration the project tests. KernelSU and KernelSU-Next compile the same files with no
   # flag at all, which is why this is empty for them rather than a shared value.
   FLAVOR_CONFIG: ${{ fromJSON('{"kernelsu":"","kernelsu-next":"","resukisu":"CONFIG_KSU_TRACEPOINT_HOOK=y CONFIG_KSU_MULTI_MANAGER_SUPPORT=y"}')[inputs.flavor || 'kernelsu'] }}
+  # Which rustc builds `ksud`.
+  #
+  # ReSukiSU's is nightly by construction - `userspace/ksud/src/main.rs` opens with
+  # `#![feature(decl_macro)]`, which stable refuses outright (E0554), and its own `ksud.yml`
+  # installs nightly with `rust-src` - while KernelSU and KernelSU-Next build on stable, which is
+  # also what the runner already carries. The toolchain is named rather than assumed so the two
+  # cases cannot be confused: `cargo +stable` is what the runner would have done anyway.
+  FLAVOR_TOOLCHAIN: ${{ fromJSON('{"kernelsu":"stable","kernelsu-next":"stable","resukisu":"nightly"}')[inputs.flavor || 'kernelsu'] }}
 
 jobs:
   # ---------------------------------------------------------------------------------------------
@@ -220,8 +228,13 @@ jobs:
       - name: Neither shortcut may drop what the full path does
         run: python3 tools/check_rkp_branch.py --tree KernelSU
 
-      - name: Rust target
-        run: rustup target add aarch64-linux-android
+      - name: Rust toolchain and target
+        run: |
+          # `--target` on the install, so the target is added to *this* toolchain. `rustup target add`
+          # alone adds it to the default one, which would leave `cargo +nightly` without an
+          # aarch64-linux-android target to build for.
+          rustup toolchain install "${{ env.FLAVOR_TOOLCHAIN }}" --profile minimal \
+            --target aarch64-linux-android
 
       - name: Android NDK
         run: |
@@ -271,7 +284,8 @@ jobs:
           # bootstrap with the first of `aarch64-linux-gnu-gcc`, `clang`, `llvm-mc` it finds.
           export PATH="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
           cd KernelSU
-          cargo build --release --locked --target aarch64-linux-android $CARGO_ARGS
+          cargo +"${{ env.FLAVOR_TOOLCHAIN }}" build --release --locked \
+            --target aarch64-linux-android $CARGO_ARGS
 
       - name: Report what was stamped
         run: |
@@ -647,8 +661,12 @@ jobs:
           name: pair-module-${{ env.FLAVOR }}-${{ inputs.target_id }}
           path: /tmp/pair
 
-      - name: Rust target
-        run: rustup target add aarch64-linux-android
+      - name: Rust toolchain and target
+        run: |
+          # See the compile-check job: ReSukiSU's `ksud` needs nightly, and the target has to be added
+          # to that toolchain rather than to the runner's default one.
+          rustup toolchain install "${{ env.FLAVOR_TOOLCHAIN }}" --profile minimal \
+            --target aarch64-linux-android
 
       - name: Android NDK
         run: |
@@ -703,7 +721,8 @@ jobs:
           ls -l "$dest"
           export PATH="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH"
           cd KernelSU
-          cargo build --release --locked --target aarch64-linux-android $CARGO_ARGS
+          cargo +"${{ env.FLAVOR_TOOLCHAIN }}" build --release --locked \
+            --target aarch64-linux-android $CARGO_ARGS
           find . -type f -name ksud -path '*/aarch64-linux-android/release/*' -exec file {} \;
 
       - name: The daemon and the module have to report one version
