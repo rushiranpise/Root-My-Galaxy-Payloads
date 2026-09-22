@@ -56,13 +56,14 @@ index fd31bb51..5afb4d21 100644
  KSU_NEW_DCACHE_FLUSH := $(shell grep -q __flush_dcache_area $(srctree)/arch/arm64/include/asm/cacheflush.h ; echo $$?)
 diff --git a/kernel/compat/samsung_defex.c b/kernel/compat/samsung_defex.c
 new file mode 100644
-index 00000000..bd384dc8
+index 00000000..5dee5e3d
 --- /dev/null
 +++ b/kernel/compat/samsung_defex.c
-@@ -0,0 +1,98 @@
+@@ -0,0 +1,124 @@
 +#include <linux/cred.h>
 +#include <linux/errno.h>
 +#include <linux/kprobes.h>
++#include <linux/moduleparam.h>
 +#include <linux/sched.h>
 +
 +#include "compat/samsung_defex.h"
@@ -80,13 +81,38 @@ index 00000000..bd384dc8
 +static defex_set_task_creds_t defex_set_task_creds;
 +static bool defex_enforce_hooked;
 +
++/*
++ * The bypass is for KernelSU's own root tasks - the ones carrying the KernelSU
++ * domain. A task can be genuinely uid 0 without that domain: adbd raised to root
++ * by the adb_root feature, or a manager whose root domain this kernel was not
++ * built against. Whether that class should bypass DEFEX too is a device decision
++ * rather than a default, so it is a switch, not the condition:
++ *
++ *     echo 1 > /sys/module/kernelsu/parameters/samsung_defex_broad_root
++ *
++ * Off leaves upstream's condition: uid 0 *and* the KernelSU domain.
++ */
++static bool samsung_defex_broad_root;
++module_param(samsung_defex_broad_root, bool, 0644);
++MODULE_PARM_DESC(samsung_defex_broad_root, "Bypass Samsung DEFEX for uid-0 tasks outside the KernelSU domain");
++
 +static int ksu_samsung_defex_pre_handler(struct kprobe *probe, struct pt_regs *regs)
 +{
 +    struct task_struct *task = (struct task_struct *)regs->regs[0];
 +
 +    (void)probe;
-+    if (task == current && current_uid().val == 0 && is_ksu_domain())
++    if (task != current || current_uid().val != 0)
++        return 0;
++
++    if (is_ksu_domain()) {
 +        regs->regs[0] = 0;
++    } else if (samsung_defex_broad_root) {
++        /* Says when the switch is doing something, so "the bypass is on" is a
++         * measurement instead of an assumption. */
++        regs->regs[0] = 0;
++        pr_info_ratelimited("Samsung DEFEX bypass: uid-0 task outside the KernelSU domain (pid %d, %s)\n",
++                            task_pid_nr(current), current->comm);
++    }
 +
 +    return 0;
 +}
@@ -988,6 +1014,27 @@ index b85dbf97..256d6442 100644
      commit_creds(cred);
 +    ksu_samsung_defex_sync_current();
  }
+diff --git a/kernel/selinux/selinux.c b/kernel/selinux/selinux.c
+index 7bc6d6d0..6536b22a 100644
+--- a/kernel/selinux/selinux.c
++++ b/kernel/selinux/selinux.c
+@@ -5,6 +5,7 @@
+ #include "linux/version.h"
+ #include "klog.h" // IWYU pragma: keep
+ #include "ksu.h"
++#include "compat/samsung_defex.h"
+ 
+ /*
+  * Cached SID values for frequently checked contexts.
+@@ -219,4 +220,7 @@
+         return;
+     }
+     commit_creds(cred);
+-}
++    /* Every path that installs root creds has to tell DEFEX, or DEFEX keeps
++     * enforcing against the task it still believes is a root task. */
++    ksu_samsung_defex_sync_current();
++}
 diff --git a/userspace/ksud/src/late_load.rs b/userspace/ksud/src/late_load.rs
 index 0a71aca3..823b39b9 100644
 --- a/userspace/ksud/src/late_load.rs

@@ -121,8 +121,15 @@ contains the complete source delta from the tagged v3.2.5 tree:
   `kdp_usecount_dec_and_test()` plus `__put_cred()`;
 - install KDP credentials through `prepare_ro_creds()` on a root workqueue and
   update the target task with the firmware-native `kdp_assign_pgd()` path;
-- synchronize the DEFEX task credential record after a successful transition;
-- limit the DEFEX allow path to the current UID-0 task already in `u:r:ksu:s0`;
+- synchronize the DEFEX task credential record after every transition that
+  installs root credentials - the su escape, the init escape and the adb-root
+  escape alike, because a path that skips it leaves DEFEX enforcing against a
+  task it still reads as root;
+- limit the DEFEX allow path to the current UID-0 task already in `u:r:ksu:s0`,
+  with the wider class - any UID-0 task outside that domain - behind an
+  off-by-default switch, `samsung_defex_broad_root`, writable at
+  `/sys/module/kernelsu/parameters/samsung_defex_broad_root` and logged when it
+  fires;
 - record a syscall-table hook only if the RKP-protected write succeeds;
 - when the dispatcher is unavailable, preserve Manager FD delivery with a
   `__arm64_sys_setresuid` kretprobe that hands the entry point the uid the process
