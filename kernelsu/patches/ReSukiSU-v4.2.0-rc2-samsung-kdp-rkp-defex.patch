@@ -608,7 +608,7 @@ index 944f43f..6f71f52 100644
  // Restore syscall_table[@nr] to its original value recorded by
  // ksu_syscall_table_hook(), and remove the entry from the tracking list.
 diff --git a/kernel/hook/syscall_hook_manager.c b/kernel/hook/syscall_hook_manager.c
-index e7b841f..12d170a 100644
+index e7b841f..94dafcd 100644
 --- a/kernel/hook/syscall_hook_manager.c
 +++ b/kernel/hook/syscall_hook_manager.c
 @@ -5,6 +5,7 @@
@@ -619,7 +619,7 @@ index e7b841f..12d170a 100644
  #include <trace/events/syscalls.h>
  
  #include <linux/version.h>
-@@ -21,6 +22,304 @@
+@@ -21,6 +22,313 @@
  #include "hook/setuid_hook.h"
  #include "hook/syscall_hook.h"
  #include "hook/syscall_event_bridge.h"
@@ -648,8 +648,17 @@ index e7b841f..12d170a 100644
 +        return false;
 +    }
 +
++    // This flavour can keep the feature behind a static key, and a key is a `struct static_key_true`
++    // rather than a bool - so the plain `&&` the other two flavours allow does not compile here.
++    // Which of the two forms it is, is `KSU_COMPAT_USE_STATIC_KEY`'s business, exactly as it is in
++    // `feature/sucompat.c`, where every use of this flag is written the same two ways.
++#ifdef KSU_COMPAT_USE_STATIC_KEY
++    return static_branch_unlikely(&ksu_su_compat_enabled) &&
++           ksu_is_allow_uid_for_current(ksu_get_uid_t(current_uid()));
++#else
 +    return ksu_su_compat_enabled &&
-+           ksu_is_allow_uid_for_current(current_uid().val);
++           ksu_is_allow_uid_for_current(ksu_get_uid_t(current_uid()));
++#endif
 +}
 +
 +static long __nocfi samsung_sucompat_execve(const struct pt_regs *regs)
@@ -924,7 +933,7 @@ index e7b841f..12d170a 100644
  
  #ifdef CONFIG_KRETPROBES
  
-@@ -126,6 +425,31 @@ void __init ksu_syscall_hook_manager_init(void)
+@@ -126,6 +434,31 @@ void __init ksu_syscall_hook_manager_init(void)
      int ret;
      pr_info("hook_manager: ksu_hook_manager_init called\n");
  
@@ -956,7 +965,7 @@ index e7b841f..12d170a 100644
  #ifdef CONFIG_KRETPROBES
      syscall_regfunc_rp = init_kretprobe("syscall_regfunc", syscall_regfunc_handler);
      syscall_unregfunc_rp = init_kretprobe("syscall_unregfunc", syscall_unregfunc_handler);
-@@ -157,6 +481,23 @@ void __init ksu_syscall_hook_manager_init(void)
+@@ -157,6 +490,23 @@ void __init ksu_syscall_hook_manager_init(void)
  void __exit ksu_syscall_hook_manager_exit(void)
  {
      pr_info("hook_manager: ksu_hook_manager_exit called\n");
