@@ -56,7 +56,15 @@ VERSIONED_ID = re.compile(r"^(?P<prefix>.+?)-(?P<flavour>rsksu|ksun?)(?P<version
 # A build tree's own release rather than a device's: `6.6.127-4k-g46a034eca005-dirty`.
 BUILD_TREE = re.compile(r"-g[0-9a-f]{7,}(-dirty)?$")
 # The version a pair-built daemon carries: `3.4.0 (uapi: 4)`, which is `ksud -V`'s own answer.
-DAEMON_VERSION = re.compile(rb"(\d+\.\d+\.\d+) \(uapi: \d+\)")
+#
+# A pre-release tag is part of that name rather than a description of the commit - ReSukiSU has no
+# released version at all, so `4.2.0-rc2 (uapi: 4)` is what its daemon carries - and the suffix is
+# spelled out here rather than matched loosely, so `3.4.0-4-g1a879d6a (uapi: 4)` is still not read as
+# a version: the number before ` (uapi:` has to be the whole name.
+DAEMON_VERSION = re.compile(
+    rb"(\d+\.\d+(?:\.\d+)*(?:-(?:alpha|beta|rc|pre|preview|milestone)\.?\d*)?) \(uapi: \d+\)",
+    re.IGNORECASE,
+)
 
 # The artifact suffix each flavour publishes under, and the id a feed entry declares for it. The two
 # are not the same string (`-rsksu` against `resukisu`) because the first is a file name and the second
@@ -435,6 +443,23 @@ def self_test(repo: str = ".", feed: str = "support/targets-v3.json") -> int:
         match = DAEMON.match(name)
         if not match or (match.group("suffix") or "") != suffix or match.group("target") != target:
             print(f"  {name}: not read as a daemon for {target}")
+            failures += 1
+
+    # The daemon's own stamp, on the three shapes it can have. Read from bytes rather than from a file
+    # because that is what the caller does: `daemon_version()` is given a binary and searches it.
+    for blob, expected in (
+        (b"3.4.0 (uapi: 4)", "3.4.0"),
+        (b"4.2.0-rc2 (uapi: 4)", "4.2.0-rc2"),
+        (b"\x00\x1f3.3.0 (uapi: 4)\x00padding", "3.3.0"),
+        # A commit past the tag is not a version, and must not be read as one.
+        (b"3.4.0-4-g1a879d6a (uapi: 4)", None),
+        # A tagless checkout answers with a bare commit hash, which is not a version at all.
+        (b"1a879d6a (uapi: 4)", None),
+    ):
+        found = DAEMON_VERSION.search(blob)
+        actual = found.group(1).decode() if found else None
+        if actual != expected:
+            print(f"  {blob!r}: expected the stamp {expected!r}, got {actual!r}")
             failures += 1
 
     # The id a resukisu entry carries has to be readable back into the pair it serves, and its prefix
