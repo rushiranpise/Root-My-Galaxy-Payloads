@@ -152,6 +152,50 @@ That decision is the reason this release still needed a human even though the ot
 insertions: the rebase tool resolves add/add against an empty ancestor and refuses anything that changes a
 line the ancestor had, which is exactly right here.
 
+## A feature the dispatcher check was hiding
+
+Our delta makes `ksu_syscall_table_hook` report a failed write, and `ksu_syscall_hook_manager_init`
+returns early when the dispatcher could not be installed. On a Samsung target RKP refuses the write to
+`sys_call_table` — the dm1q record's fourth postmortem has the abort that proves it — so that early
+return is the branch these devices take. Upstream's init ends with three registrations:
+
+```c
+ksu_setuid_hook_init();
+ksu_sucompat_init();
+ksu_avc_spoof_init();
+```
+
+The first two are exactly what the RKP branch replaces with its own kretprobe/kprobe pair. The third was
+not named in that branch at all. So on every target whose syscall table cannot be patched the
+`avc_spoof` feature handler (id 10003) was never registered, `ksud feature check avc_spoof` answered
+`unsupported`, and the manager's **AVC spoofing** switch read as unavailable — on a device where the
+only thing missing was a registration.
+
+What the feature needs is not the dispatcher: it reaches `slow_avc_audit` through a kprobe of its own,
+registered from `ksu_avc_spoof_late_init()` at boot-completed, and it never touches a syscall. Both Next
+patches now call `ksu_avc_spoof_init()` in that early return as well, with `ksu_avc_spoof_exit()` in the
+matching one, in the order upstream uses. Five lines per patch: a regenerated patch differs from the one
+before it only in `syscall_hook_manager.c`'s two hunks and their counts.
+
+What that changes, and what it does not: the switch becomes real, because the handler now exists and can
+be read and set. It does not change *when* the kprobe goes in — late init runs regardless of
+registration, so the spoof was already being installed wherever the boot-completed event reaches the
+driver. The difference is that a feature running invisibly becomes one the user can see and turn off.
+
+The tiann leg is untouched, and by evidence rather than by assumption: its 3.3.0
+`ksu_syscall_hook_manager_init` ends at `ksu_setuid_hook_init()` and `ksu_sucompat_init()`, with no
+feature registration behind them, so our early return skips nothing there.
+
+One consequence of where the fix lives: it reaches a device only through a rebuilt pair. The published
+artifacts are what the loader gets, so this changes nothing on a phone until the pair is republished.
+
+A check now runs wherever the patch is applied — `tools/check_rkp_branch.py --tree KernelSU`, in all four
+jobs of the build workflow. It reads the branch out of the patched file and refuses one that is missing
+an `_init` the rest of the function calls, with the two Samsung stand-ins named as the only allowed
+substitutions, and `--self-test` proving it can fail. Run against the previous patch it names
+exactly `ksu_avc_spoof_init()`. Upstream adds to that tail, and the next addition would otherwise be
+dropped the same way — by someone reading a diff rather than by something refusing one.
+
 ## The version number is derived from the tag, not written down
 
 `kernel/Kbuild` computes the module's version as `30000 + git rev-list --count HEAD` and prints it while

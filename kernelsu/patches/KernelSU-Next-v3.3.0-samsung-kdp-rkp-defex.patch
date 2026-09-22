@@ -607,7 +607,7 @@ index 944f43f..f6abeac 100644
  // Restore syscall_table[@nr] to its original value recorded by
  // ksu_syscall_table_hook(), and remove the entry from the tracking list.
 diff --git a/kernel/hook/syscall_hook_manager.c b/kernel/hook/syscall_hook_manager.c
-index d46f1ce..0c768f8 100644
+index d46f1ce..0117ee9 100644
 --- a/kernel/hook/syscall_hook_manager.c
 +++ b/kernel/hook/syscall_hook_manager.c
 @@ -5,6 +5,7 @@
@@ -923,7 +923,7 @@ index d46f1ce..0c768f8 100644
  
  #ifdef CONFIG_KRETPROBES
  
-@@ -126,6 +425,19 @@ void __init ksu_syscall_hook_manager_init(void)
+@@ -126,6 +425,23 @@ void __init ksu_syscall_hook_manager_init(void)
      int ret;
      pr_info("hook_manager: ksu_hook_manager_init called\n");
  
@@ -935,6 +935,10 @@ index d46f1ce..0c768f8 100644
 +        if (ret)
 +            pr_err("hook_manager: Samsung sucompat hook init failed: %d\n", ret);
 +#endif
++        // This feature hooks no syscall: slow_avc_audit is reached by its own kprobe, registered
++        // from late init. Registering the handler here keeps it visible to the manager on a target
++        // whose syscall table cannot be patched, where it otherwise reports "unsupported".
++        ksu_avc_spoof_init();
 +        return;
 +    }
 +
@@ -943,7 +947,7 @@ index d46f1ce..0c768f8 100644
  #ifdef CONFIG_KRETPROBES
      syscall_regfunc_rp = init_kretprobe("syscall_regfunc", syscall_regfunc_handler);
      syscall_unregfunc_rp = init_kretprobe("syscall_unregfunc", syscall_unregfunc_handler);
-@@ -157,6 +469,16 @@ void __init ksu_syscall_hook_manager_init(void)
+@@ -157,6 +473,17 @@ void __init ksu_syscall_hook_manager_init(void)
  void __exit ksu_syscall_hook_manager_exit(void)
  {
      pr_info("hook_manager: ksu_hook_manager_exit called\n");
@@ -954,6 +958,7 @@ index d46f1ce..0c768f8 100644
 +        samsung_setresuid_hook_exit();
 +#endif
 +        ksu_syscall_hook_exit();
++        ksu_avc_spoof_exit();
 +        return;
 +    }
 +

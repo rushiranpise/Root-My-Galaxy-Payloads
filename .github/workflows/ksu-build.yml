@@ -202,6 +202,9 @@ jobs:
       - name: Apply the Samsung patch
         run: git -C KernelSU apply --verbose "$GITHUB_WORKSPACE/${{ env.PATCH }}"
 
+      - name: The early return must not drop a registration
+        run: python3 tools/check_rkp_branch.py --tree KernelSU
+
       - name: Rust target
         run: rustup target add aarch64-linux-android
 
@@ -327,6 +330,9 @@ jobs:
         run: |
           git config --global --add safe.directory "$GITHUB_WORKSPACE/KernelSU"
           git -C KernelSU apply --verbose "$GITHUB_WORKSPACE/${{ env.PATCH }}"
+
+      - name: The early return must not drop a registration
+        run: python3 tools/check_rkp_branch.py --tree KernelSU
 
       - name: Build kernelsu.ko
         run: |
@@ -461,6 +467,9 @@ jobs:
           git config --global --add safe.directory "$GITHUB_WORKSPACE/KernelSU"
           git -C KernelSU apply --verbose "$GITHUB_WORKSPACE/${{ env.PATCH }}"
 
+      - name: The early return must not drop a registration
+        run: python3 tools/check_rkp_branch.py --tree KernelSU
+
       - name: Build for the target release
         env:
           TARGET_RELEASE: ${{ inputs.target_release }}
@@ -592,6 +601,9 @@ jobs:
 
       - name: Apply the Samsung patch
         run: git -C KernelSU apply --verbose "$GITHUB_WORKSPACE/${{ env.PATCH }}"
+
+      - name: The early return must not drop a registration
+        run: python3 tools/check_rkp_branch.py --tree KernelSU
 
       - name: Show what the daemon already carries
         env:
