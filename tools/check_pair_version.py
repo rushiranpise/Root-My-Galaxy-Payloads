@@ -70,6 +70,13 @@ from check_kernel_version import (  # noqa: E402
 SUFFIXED = re.compile(r"-\d+-g[0-9a-f]+$")
 DOTTED = re.compile(r"\d+\.\d+(?:\.\d+)*")
 
+# The pre-release part of a version name - `4.2.0-rc2`, which is what `git describe` answers for a tag
+# that is one. It is part of the version rather than a description of the commit, so it is taken off
+# before the dotted test below instead of failing it: refusing it would refuse every pair built by a
+# project that ships pre-releases, which is exactly what a project without a released version has.
+# `SUFFIXED` is checked first, so a commit past the tag is still told apart from a pre-release tag.
+PRERELEASE = re.compile(r"-(?:alpha|beta|rc|pre|preview|milestone)\.?\d*.*$", re.IGNORECASE)
+
 
 @dataclass(frozen=True)
 class Stamp:
@@ -206,7 +213,7 @@ def verdict(module: Stamp, daemon: Stamp, ref: str | None) -> str | None:
     # more useful thing to be told than "that is not a version".
     if SUFFIXED.search(daemon.name):
         return "suffix"
-    if not DOTTED.fullmatch(daemon.name):
+    if not DOTTED.fullmatch(PRERELEASE.sub("", daemon.name)):
         return "name"
     if ref:
         expected = ref.lstrip("v")
@@ -329,6 +336,22 @@ def self_test() -> int:
             Stamp(version=33294, name="1a879d6a", commit="1a879d6a", ref="", tag=None, where="tree"),
             "v3.4.0",
             "name",
+        ),
+        (
+            # A project that ships pre-releases has no other kind of tag, so its version name is one
+            # and the pair is right: `4.2.0-rc2` is a version, `1a879d6a` is not.
+            "a pre-release tag",
+            module(version=30700 + 3514, ref="v4.2.0-rc2", tag="v4.2.0-rc2"),
+            Stamp(version=30700 + 3514, name="4.2.0-rc2", commit="1a879d6a", ref="", tag="v4.2.0-rc2", where="tree"),
+            "v4.2.0-rc2",
+            None,
+        ),
+        (
+            "a pre-release name this run did not ask for",
+            module(),
+            Stamp(version=33294, name="4.2.0-rc2", commit="1a879d6a", ref="", tag=None, where="tree"),
+            "v3.4.0",
+            "ref",
         ),
         (
             "the daemon's own fallback",
