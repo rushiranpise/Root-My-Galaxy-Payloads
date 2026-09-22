@@ -75,11 +75,42 @@ and `on_boot_completed()` calls `ksu_selinux_hide_drop_backup_if_unused()`, whic
 does not. The second is a cleanup rather than a feature arming - unlike the `avc_spoof` call whose
 absence the same check found in KernelSU-Next - so it is left alone and stated here instead.
 
+## What the first compile found
+
+Four things, all of them properties of this tree rather than of the delta, and none of them visible
+from reading patch against patch:
+
+1. **`ksu_su_compat_enabled` is a `struct static_key_true` here.** KernelSU-Next declares it as a
+   plain `bool`, so the ported Samsung block's `a && b` on it was an error rather than a false. The
+   block now writes both forms under `KSU_COMPAT_USE_STATIC_KEY` - the guard `feature/sucompat.c` puts
+   around every use of the flag - and takes the uid through `ksu_get_uid_t`, which is what this
+   tree's own sucompat path does.
+2. **`ksu_sucompat_exit` is `__exit` here.** The Samsung kprobe unwind called it on the failure path,
+   which is a section mismatch modpost refuses outright (`.init.text` reaching `.exit.text`) - and
+   the wrong thing to do besides: it unregisters the `su_compat` feature handler that the rest of the
+   module registers its syscall paths against, on a load that only failed to register a kprobe. The
+   unwind now unregisters what it registered and returns; `core/init.c` is where this flavour exits
+   it. KernelSU-Next's identical block keeps its call, because there the symbol is not `__exit`.
+3. **`ksud` is nightly by construction.** `userspace/ksud/src/main.rs` opens with
+   `#![feature(decl_macro)]`, which stable rejects with E0554, and ReSukiSU's own `ksud.yml` installs
+   nightly with `rust-src`. The toolchain is now a per-flavour input of `ksu-build.yml`.
+4. **There is no "latest release" to watch.** Every ReSukiSU release is marked pre-release, so
+   GitHub answers `release not found` for the repository and `gh release view` fails; the upstream
+   watcher falls back to the newest tag for a flavour in that state. The same fact puts a pre-release
+   tag in `git describe`, so `tools/check_pair_version.py` had to learn that `4.2.0-rc2` is a version
+   name while `1a879d6a` is not.
+
+What the build proves: both module jobs (patch-text and no-patch-text), `ksud`, the pair module and
+`ksud` around it all compile, and both halves report the same version -
+`pair version 35144 (4.2.0-rc2) at 3576e6a5255f`, which is `30000 + 700 + 3514` commits. The published
+module's `vermagic` is the target's own release, which is what the device's loader checks.
+
 ## Not verified
 
-No compile and no device run yet. The patch applies cleanly to a fresh `v4.2.0-rc2` checkout and both
-edited Rust files parse under the crate's edition; the type check is the CI build's job. Nothing here
-has been loaded on a phone, and the question the Next delta needed a device to answer - what `su` can
-actually do with no dispatcher - is open for this tree too. The manager side is not part of the patch:
+No device run yet. The patch applies cleanly to a fresh `v4.2.0-rc2` checkout, both edited Rust files
+parse under the crate's edition, and CI now compiles both halves for `pa3q` - but the question the Next
+delta needed a device to answer is still open here: what `su` can actually do on a Samsung kernel withno dispatcher, and whether the kretprobe stand-ins carry the same work the tracepoint path does.
+
+The manager side is not part of the patch:
 a ReSukiSU manager is a third-party APK whose signature the kernel validates, with
 `ksud kernel dynamic-manager set <size> <hash>` as the way a manager gets registered at runtime.
