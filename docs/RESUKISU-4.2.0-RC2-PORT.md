@@ -69,11 +69,18 @@ support for a release candidate and the upstream watcher has to move it when 4.2
 
 ## What the guard says
 
-`tools/check_rkp_branch.py --tree <patched tree>` exits 0 with two notes it prints for the record:
+`tools/check_rkp_branch.py --tree <patched tree>` exits 0 with three notes it prints for the record:
 the early-return branch makes 4 calls and registers none of the dispatcher's registrations (intended),
-and `on_boot_completed()` calls `ksu_selinux_hide_drop_backup_if_unused()`, which the late-load branch
-does not. The second is a cleanup rather than a feature arming - unlike the `avc_spoof` call whose
-absence the same check found in KernelSU-Next - so it is left alone and stated here instead.
+`on_boot_completed()` calls `ksu_selinux_hide_drop_backup_if_unused()`, which the late-load branch
+does not, and the setuid kretprobe hands the two uids over in the order this tree declares. The second
+is a cleanup rather than a feature arming - unlike the `avc_spoof` call whose absence the same check
+found in KernelSU-Next - so it is left alone and stated here instead.
+
+The third check is the one the device run below added. It resolves the order out of the tree - reading
+the entry point's parameter names, and following a wrapper's forward call when the names do not say -
+so it passes on KernelSU's and KernelSU-Next's `(old_uid, new_uid)` as well as on this tree's legacy
+`(ruid, euid, suid)` wrapper, and fails only on the mismatch. It runs in all four build legs, and the
+self-test holds it to the ReSukiSU-shaped tree with the other convention's call.
 
 ## What the first compile found
 
@@ -105,11 +112,53 @@ What the build proves: both module jobs (patch-text and no-patch-text), `ksud`, 
 `pair version 35144 (4.2.0-rc2) at 3576e6a5255f`, which is `30000 + 700 + 3514` commits. The published
 module's `vermagic` is the target's own release, which is what the device's loader checks.
 
+## What the device found: the manager was never crowned
+
+The first run on the `pa3q` target loaded the module, and `su` worked - but ReSukiSU's own manager
+reported the kernel as absent: `KernelSU: -1`, `ReSukiSU:` empty, `LKM: false` in its own bug report,
+and `could not retrieve kernelsu driver fd` in its log after `install syscall was blocked by seccomp`.
+Both of those are the same absence: the manager's process holds no `ksu_driver` fd, which is the only
+thing its version, features and module list are read through.
+
+The kernel's side of the story is in `dmesg`, and it is not what it looks like. The manager search ran
+and the app was crowned twice - `Crowning manager: com.resukisu.resukisu uid=10553,
+signature_index=0` - so recognition was fine. What never happened is the step after it:
+`ksu_install_fd()` is called from exactly two places, and the one that serves an app is the manager
+branch of `ksu_handle_setuid()`. `install fd for ksu manager(uid=...)` appears nowhere in any of the
+three `dmesg` captures. Every app spawn reached the hook - the log is full of
+`handle_setresuid from 10553 to 0`-shaped lines - and every one of them was read as a move *to* uid 0.
+
+That is this delta's own bug, and it is a one-line one. KernelSU and KernelSU-Next define
+`ksu_handle_setresuid(uid_t old_uid, uid_t new_uid)` and their bridge calls it `(captured_old, current)`,
+which is what the ported kretprobe was copied from. This tree kept the older
+`ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid)`: the manual-hook entry point, whose `ruid`
+is the uid being moved *to* and whose body reads the uid being left from `current_cred()` itself - its
+own bridge says so, calling `ksu_handle_setuid(current_uid(), old_uid)`. Handing its first parameter the
+*old* uid therefore reverses the pair at every spawn, and `ksu_handle_setuid()` never sees the uid the
+process moved to. `ksu_is_manager_uid(new_uid)` is asked about `0`, the manager branch is skipped, and
+no manager is ever handed the fd.
+
+The quiet part is the collateral: the same branch is where `ksu_seccomp_allow_cache(filter,
+__NR_reboot)` runs, which is how a manager is allowed to install its own fd with the `reboot` syscall -
+the exact syscall the manager's log said was blocked. So both routes to a manager fd were closed by the
+same hand-off. This was never ReSukiSU-specific in shape either: the same call sits in the KernelSU
+`v3.2.5` and `v3.3.0` and KernelSU-Next `v3.3.0` and `v3.4.0` patches, correct there by the accident of
+matching convention, and wrong the moment a rebase moves one of them onto a tree that names the
+parameter differently.
+
+The patch now calls `ksu_handle_setuid(work->new_uid, work->old_uid)` - the same tuple this tree's own
+bridge passes, and a declared function rather than the implicit declaration the old call was silently
+relying on. `tools/check_rkp_branch.py --tree <tree>` is what keeps it honest: verified exit 0 on the
+patched `v4.2.0-rc2`, KernelSU-Next `v3.4.0`, KernelSU `v3.3.0` and `v3.2.5` trees, and exit 1 with the
+defect named on a `v4.2.0-rc2` checkout carrying the previous patch.
+
 ## Not verified
 
-No device run yet. The patch applies cleanly to a fresh `v4.2.0-rc2` checkout, both edited Rust files
-parse under the crate's edition, and CI now compiles both halves for `pa3q` - but the question the Next
-delta needed a device to answer is still open here: what `su` can actually do on a Samsung kernel withno dispatcher, and whether the kretprobe stand-ins carry the same work the tracepoint path does.
+The fix above is read off the kernel log of the run that failed, not off a run that succeeded: no
+module built from this patch has been loaded on the device yet. What is still open is the rest of the
+question the Next delta needed a device to answer - what `su` can actually do on a Samsung kernel with
+no dispatcher, and whether the kretprobe stand-ins carry the same work the tracepoint path does. The
+manager fd is the first of those to have a concrete, checkable answer.
 
 The manager side is not part of the patch:
 a ReSukiSU manager is a third-party APK whose signature the kernel validates, with

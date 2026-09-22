@@ -608,7 +608,7 @@ index 944f43f..6f71f52 100644
  // Restore syscall_table[@nr] to its original value recorded by
  // ksu_syscall_table_hook(), and remove the entry from the tracking list.
 diff --git a/kernel/hook/syscall_hook_manager.c b/kernel/hook/syscall_hook_manager.c
-index e7b841f..1bccf06 100644
+index e7b841f..1a63faa 100644
 --- a/kernel/hook/syscall_hook_manager.c
 +++ b/kernel/hook/syscall_hook_manager.c
 @@ -5,6 +5,7 @@
@@ -619,7 +619,7 @@ index e7b841f..1bccf06 100644
  #include <trace/events/syscalls.h>
  
  #include <linux/version.h>
-@@ -21,6 +22,319 @@
+@@ -21,6 +22,327 @@
  #include "hook/setuid_hook.h"
  #include "hook/syscall_hook.h"
  #include "hook/syscall_event_bridge.h"
@@ -867,7 +867,15 @@ index e7b841f..1bccf06 100644
 +{
 +    struct ksu_setresuid_task_work *work = container_of(callback, struct ksu_setresuid_task_work, callback);
 +
-+    ksu_handle_setresuid(work->old_uid, work->new_uid);
++    // Not `ksu_handle_setresuid`: this fork's is the legacy manual-hook entry point, not the
++    // `(old_uid, new_uid)` one KernelSU and KernelSU-Next declare. It takes the uid the process is
++    // moving *to* as its first argument and reads the one it is leaving from `current_cred()`
++    // itself, exactly as this tree's own syscall bridge does with
++    // `ksu_handle_setuid(current_uid(), old_uid)`. Handing it our capture in the other order made
++    // every app spawn arrive as `new_uid = 0`, so `ksu_is_manager_uid()` could never match, the
++    // manager branch was never taken, and no manager ever received the driver fd that says the
++    // kernel is installed - while `su` kept working, because root arrives through the execve kprobe.
++    ksu_handle_setuid(work->new_uid, work->old_uid);
 +    kfree(work);
 +}
 +
@@ -939,7 +947,7 @@ index e7b841f..1bccf06 100644
  
  #ifdef CONFIG_KRETPROBES
  
-@@ -126,6 +440,31 @@ void __init ksu_syscall_hook_manager_init(void)
+@@ -126,6 +448,31 @@ void __init ksu_syscall_hook_manager_init(void)
      int ret;
      pr_info("hook_manager: ksu_hook_manager_init called\n");
  
@@ -971,7 +979,7 @@ index e7b841f..1bccf06 100644
  #ifdef CONFIG_KRETPROBES
      syscall_regfunc_rp = init_kretprobe("syscall_regfunc", syscall_regfunc_handler);
      syscall_unregfunc_rp = init_kretprobe("syscall_unregfunc", syscall_unregfunc_handler);
-@@ -157,6 +496,23 @@ void __init ksu_syscall_hook_manager_init(void)
+@@ -157,6 +504,23 @@ void __init ksu_syscall_hook_manager_init(void)
  void __exit ksu_syscall_hook_manager_exit(void)
  {
      pr_info("hook_manager: ksu_hook_manager_exit called\n");

@@ -125,7 +125,10 @@ contains the complete source delta from the tagged v3.2.5 tree:
 - limit the DEFEX allow path to the current UID-0 task already in `u:r:ksu:s0`;
 - record a syscall-table hook only if the RKP-protected write succeeds;
 - when the dispatcher is unavailable, preserve Manager FD delivery with a
-  `__arm64_sys_setresuid` kretprobe and provide sucompat through address-based
+  `__arm64_sys_setresuid` kretprobe that hands the entry point the uid the process
+  moved *to* in the position that tree declares for it - the trees disagree, and
+  KernelSU and KernelSU-Next take `(old_uid, new_uid)` while ReSukiSU's legacy
+  wrapper takes the new uid first - and provide sucompat through address-based
   syscall kprobes without modifying the syscall table;
 - mark nested sucompat calls so a handler invoking the original syscall cannot
   recursively enter the same kprobe;
