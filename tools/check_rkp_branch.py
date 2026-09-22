@@ -24,14 +24,28 @@ That function is where `ksu_avc_spoof_late_init()` arms the hook, so on a late-l
 was registered and enabled and yet never armed. `kernel/core/init.c` therefore calls it on the late-load
 path, and `REQUIRED_ON_LATE_LOAD` below is what must stay there.
 
-`--tree` checks a patched checkout for both. The second one also *reports* the work a late-loaded module
+**The setuid hand-off.** The kretprobe stands in for the dispatcher's `ksu_hook_setresuid()`, which knew
+both uids - the one the process was leaving (`old_uid`, captured before the call) and the one it moved to
+(`current_uid()` after it) - and passed them to the tree's setuid entry point in the order *that tree*
+declares. The order is not the same everywhere. KernelSU and KernelSU-Next define
+`ksu_handle_setresuid(uid_t old_uid, uid_t new_uid)` and call it `(captured_old, current)`. ReSukiSU kept
+the older `ksu_handle_setresuid(uid_t ruid, uid_t euid, uid_t suid)` - the manual-hook entry point, whose
+`ruid` is the uid being moved *to* and whose body reads the uid being left from `current_cred()` itself.
+Copying the second call into the first tree's delta reverses the pair, and the reversal is silent in the
+worst way: `ksu_handle_setuid()` then sees every app spawn as `new_uid = 0`, so `ksu_is_manager_uid()`
+never matches, the manager branch never runs, no manager is ever handed the driver fd - while root, which
+arrives through the execve kprobe, keeps working. The manager app reads that absence as "not installed"
+(`KernelSU: -1`, `LKM: false`) on a phone whose kernel module is loaded and answering.
+
+`--tree` checks a patched checkout for all three. The second also *reports* the work a late-loaded module
 still skips, because the two paths are never going to match exactly and the difference should be visible
-rather than remembered.
+rather than remembered; the third resolves the order out of the tree rather than asserting one, so it
+passes on both conventions and fails only on the mismatch.
 
     tools/check_rkp_branch.py --tree KernelSU     # a checkout the patch has already been applied to
-    tools/check_rkp_branch.py --self-test         # prove both checks can fail
+    tools/check_rkp_branch.py --self-test         # prove all three checks can fail
 
-Exit status is 0 when both shortcuts are complete (or absent, which is the other way to be complete), 1
+Exit status is 0 when every shortcut is complete (or absent, which is the other way to be complete), 1
 when something is missing, 2 on an unreadable tree.
 """
 
@@ -45,6 +59,7 @@ from pathlib import Path
 FILE = Path("kernel/hook/syscall_hook_manager.c")
 BOOT_EVENT = Path("kernel/runtime/boot_event.c")
 CORE_INIT = Path("kernel/core/init.c")
+SETUID = Path("kernel/hook/setuid_hook.c")
 
 # The two registrations the branch does not lose but moves: `samsung_setresuid_hook_init()` and
 # `samsung_sucompat_hook_init()` call these themselves, inside the branch. Anything else in the normal
@@ -71,6 +86,34 @@ REGISTERING = re.compile(r"\b([A-Za-z_]\w*_init)\s*\(")
 # thing happened, it does not do it, and it is not worth reporting as skipped.
 CALL = re.compile(r"\b([A-Za-z_]\w*)\s*\(")
 NOT_WORK = {"if", "for", "while", "switch", "return", "sizeof", "typeof", "min", "max"}
+
+# The task work that forwards the kretprobe's capture into the tree's setuid engine.
+TASK_WORK = "static void setresuid_task_work_func(struct callback_head *callback)"
+
+# The primitive the setuid handling is built on, and the entry point the manual-hook integration - and
+# therefore this delta - is meant to call. In some trees the second is a wrapper around the first; in
+# others it is the engine itself.
+PRIMITIVE = "ksu_handle_setuid"
+ENTRY = "ksu_handle_setresuid"
+
+
+
+# Which end of the move a parameter is named for. `ruid` is deliberately in neither: ReSukiSU's wrapper
+# is resolved by following its forward call, not by reading its names.
+OLD_NAMED = re.compile(r"old|previous|prev|before")
+NEW_NAMED = re.compile(r"new_uid|new")
+
+BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.S)
+LINE_COMMENT = re.compile(r"//[^\n]*")
+
+
+def without_comments(code: str) -> str:
+    """The code with its comments removed.
+
+    The task work's own comment quotes the very call this check reads, and taking that for the call
+    would make the check answer with prose.
+    """
+    return LINE_COMMENT.sub("", BLOCK_COMMENT.sub("", code))
 
 
 def body_after(text: str, start: int) -> tuple[str, int] | None:
@@ -118,6 +161,157 @@ def calls(code: str) -> set[str]:
         for name in (match.group(1) for match in CALL.finditer(code))
         if not name.startswith("pr_") and name not in NOT_WORK
     }
+
+
+def split_arguments(inner: str) -> list[str]:
+    """The top-level arguments of a call's argument list."""
+    arguments: list[str] = []
+    depth = 0
+    current = ""
+    for character in inner:
+        if character == "(":
+            depth += 1
+        elif character == ")":
+            depth -= 1
+        if character == "," and depth == 0:
+            arguments.append(current.strip())
+            current = ""
+        else:
+            current += character
+    if current.strip():
+        arguments.append(current.strip())
+    return arguments
+
+
+def calls_named(code: str, names: tuple[str, ...]) -> list[tuple[str, list[str]]]:
+    """Every call to one of `names`, with its arguments split at the top level.
+
+    Depth-counted rather than a regular expression: the wrapper this check has to read forwards
+    `ksu_get_uid_t(current_uid())`, which is a call nested inside the argument list.
+    """
+    pattern = re.compile(r"\b({})\s*\(".format("|".join(names)))
+    found: list[tuple[str, list[str]]] = []
+    for match in pattern.finditer(code):
+        depth = 1
+        index = match.end()
+        while index < len(code) and depth:
+            if code[index] == "(":
+                depth += 1
+            elif code[index] == ")":
+                depth -= 1
+            index += 1
+        if depth:
+            break
+        found.append((match.group(1), split_arguments(code[match.end() : index - 1])))
+    return found
+
+
+def parameter_names(parameters: str) -> list[str]:
+    """The identifier at the end of each comma-separated parameter."""
+    names = []
+    for parameter in parameters.split(","):
+        tokens = re.findall(r"[A-Za-z_]\w*", parameter)
+        if tokens:
+            names.append(tokens[-1])
+    return names
+
+
+def declarations(code: str) -> dict[str, list[str]]:
+    """The two setuid entry points' parameter lists, as this tree declares them."""
+    code = without_comments(code)
+    found: dict[str, list[str]] = {}
+    for name in (PRIMITIVE, ENTRY):
+        match = re.search(r"\b{}\s*\(([^)]*)\)\s*\{{".format(name), code)
+        if match:
+            found[name] = parameter_names(match.group(1))
+    return found
+
+
+def named_slots(names: list[str]) -> dict[str, int]:
+    """{"new": i, "old": j} from a parameter list that names the two ends of the move.
+
+    Only answers when the names do: an unnamed pair (ReSukiSU's `ruid`/`euid`) resolves through the
+    forward call instead, and guessing here would be the very assumption this check exists to remove.
+    """
+    slots: dict[str, int] = {}
+    for index, name in enumerate(names[:2]):
+        if NEW_NAMED.search(name):
+            slots.setdefault("new", index)
+        elif OLD_NAMED.search(name):
+            slots.setdefault("old", index)
+    if "old" in slots and "new" not in slots:
+        slots["new"] = 1 - slots["old"]
+    return slots
+
+
+def uid_slots(name: str, table: dict[str, list[str]], code: str) -> dict[str, int]:
+    """Which of `name`'s own parameters hold the uid moved *to* and the uid moved *from*.
+
+    A tree where `name` is the engine says so in its parameter names. A tree where it is a wrapper -
+    ReSukiSU's is - says so in what it forwards: map the primitive's slots onto the wrapper's
+    parameters through that call. "old" is absent when the wrapper reads the previous uid from
+    `current_cred()` itself, and then passing one is meaningless rather than wrong.
+    """
+    names = table.get(name)
+    if not names:
+        return {}
+    if name == PRIMITIVE:
+        return named_slots(names)
+
+    body = function_body(code, f"int {name}(")
+    forwarded: list[str] | None = None
+    if body:
+        for called, arguments in calls_named(without_comments(body), (PRIMITIVE,)):
+            forwarded = arguments
+            break
+
+    primitive = named_slots(table.get(PRIMITIVE, []))
+    if forwarded is None or not primitive:
+        return named_slots(names)
+
+    slots: dict[str, int] = {}
+    for end, position in primitive.items():
+        if position < len(forwarded) and forwarded[position] in names:
+            slots[end] = names.index(forwarded[position])
+    return slots
+
+
+def setuid_order(manager: str, setuid: str) -> tuple[str, str]:
+    """Whether the kretprobe hands the uids over in the order this tree's entry point takes them.
+
+    "ok" or "unchecked" with what was read, "reversed" with the call that has to change.
+    """
+    body = function_body(manager, TASK_WORK)
+    if body is None:
+        return "unchecked", "no setresuid kretprobe task work in this tree"
+
+    # The call that forwards the capture is the one that mentions it; anything else the body contains
+    # (a comment, a helper) is not the hand-off.
+    found = calls_named(without_comments(body), (PRIMITIVE, ENTRY))
+    forwarding = [call for call in found if any("work->" in argument for argument in call[1])]
+    if not forwarding:
+        return "unchecked", "the kretprobe task work calls neither setuid entry point"
+    name, arguments = forwarding[0]
+    slots = uid_slots(name, declarations(setuid), setuid)
+    if not slots:
+        return "unchecked", f"this tree does not say which argument of {name}() is which uid"
+
+    expected = {"new": "work->new_uid", "old": "work->old_uid"}
+    wrong = [
+        end
+        for end, position in sorted(slots.items())
+        if position < len(arguments) and arguments[position] != expected[end]
+    ]
+    if wrong:
+        return "reversed", (
+            f"{name}({', '.join(arguments)}) against {name}() declared as "
+            f"({', '.join(declarations(setuid)[name])}), whose argument "
+            f"{slots.get('new')} is the uid moved to"
+        )
+    handed = f"{name}() receives the uid the process moved to as argument {slots['new']}"
+    if "old" in slots:
+        handed += f" and the one it left as argument {slots['old']}"
+    return "ok", f"{handed}, which is where this tree puts them"
 
 
 def analyse(text: str) -> tuple[str, set[str], set[str]]:
@@ -239,6 +433,51 @@ def self_test() -> int:
     )
     reported = "ksu_ksud_init" in skipped and not missing
 
+    # The setuid hand-off, in both conventions the trees declare - and the comment quotes the call
+    # itself, so the fixtures also hold the check to reading code rather than prose.
+    def task_work(call: str) -> str:
+        return f"""{TASK_WORK}
+{{
+    struct ksu_setresuid_task_work *work = container_of(callback, struct ksu_setresuid_task_work, callback);
+
+    // {ENTRY}(work->new_uid, work->old_uid) would be this tree's other order
+    {call};
+    kfree(work);
+}}
+"""
+
+    engine = f"""int {PRIMITIVE}(uid_t new_uid, uid_t old_uid)
+{{
+    pr_info("handle_setresuid from %d to %d\\n", old_uid, new_uid);
+    return 0;
+}}
+
+int {ENTRY}(uid_t old_uid, uid_t new_uid)
+{{
+    pr_info("handle_setresuid from %d to %d\\n", old_uid, new_uid);
+    return 0;
+}}
+"""
+
+    # ReSukiSU's shape: the entry point we call is a wrapper whose `ruid` is the uid moved *to*.
+    wrapper = f"""int {PRIMITIVE}(uid_t new_uid, uid_t old_uid)
+{{
+    return 0;
+}}
+
+int {ENTRY}(uid_t ruid, uid_t euid, uid_t suid)
+{{
+    return {PRIMITIVE}(ruid, ksu_get_uid_t(current_uid()));
+}}
+"""
+
+    engine_ok = setuid_order(task_work(f"{ENTRY}(work->old_uid, work->new_uid)"), engine)[0] == "ok"
+    engine_caught = setuid_order(task_work(f"{ENTRY}(work->new_uid, work->old_uid)"), engine)[0] == "reversed"
+    primitive_ok = setuid_order(task_work(f"{PRIMITIVE}(work->new_uid, work->old_uid)"), engine)[0] == "ok"
+    wrapper_ok = setuid_order(task_work(f"{PRIMITIVE}(work->new_uid, work->old_uid)"), wrapper)[0] == "ok"
+    wrapper_caught = setuid_order(task_work(f"{ENTRY}(work->old_uid, work->new_uid)"), wrapper)[0] == "reversed"
+    undeclared_ok = setuid_order(task_work(f"{ENTRY}(work->old_uid, work->new_uid)"), "")[0] == "unchecked"
+
     results = [
         ("complete branch", good),
         ("missing registration", caught),
@@ -247,11 +486,17 @@ def self_test() -> int:
         ("late load missing the arming", late_caught),
         ("event that arms nothing", late_absent_ok),
         ("skipped work is reported", reported),
+        ("setuid order read from the tree", engine_ok),
+        ("setuid order reversed on that tree", engine_caught),
+        ("setuid order through the primitive", primitive_ok),
+        ("setuid order through a wrapper", wrapper_ok),
+        ("setuid order reversed on a wrapper tree", wrapper_caught),
+        ("tree that does not declare it", undeclared_ok),
     ]
     for label, passed in results:
         print(f"self-test: {label} {'ok' if passed else 'FAILED'}")
     if all(passed for _, passed in results):
-        print("self-test: both checks can fail, and neither fails on a correct tree")
+        print("self-test: all three checks can fail, and none fails on a correct tree")
         return 0
     return 1
 
@@ -322,6 +567,22 @@ def main() -> int:
             print("       Work on_boot_completed() does that a late-loaded module skips:")
             for name in sorted(skipped):
                 print(f"         {name}()")
+
+    setuid = read(root / SETUID)
+    if setuid is None:
+        print(f"{root / SETUID}: unreadable, so the setuid hand-off was not checked")
+    else:
+        state, detail = setuid_order(text, setuid)
+        if state == "reversed":
+            print(f"error: {root / FILE} hands over the setuid kretprobe's capture in the wrong order:")
+            print(f"         {detail}")
+            print("       Every app spawn then arrives as a move to uid 0, so ksu_is_manager_uid() never")
+            print("       matches, the manager branch of ksu_handle_setuid() never runs, and no manager")
+            print("       is handed the driver fd - while root, which arrives through execve, keeps")
+            print("       working. The manager app reads that as \"not installed\" on a loaded kernel.")
+            status = 1
+        else:
+            print(f"{root / SETUID}: {detail}")
     return status
 
 
