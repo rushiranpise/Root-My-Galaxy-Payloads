@@ -1,7 +1,9 @@
 name: KernelSU
 
 # Compiles the KernelSU half of the payloads: the kernel module and `ksud`, each with the Samsung
-# patch applied to the tag the patch names.
+# patch applied to the tag the patch names. `flavor` selects which project - KernelSU,
+# KernelSU-Next or ReSukiSU - and with it the repository, the patch, the artifact names, the cargo
+# invocation and the extra make variables its own build passes.
 #
 # This exists because a rebase cannot be checked on every machine it is prepared on. The module needs
 # a DDK container, and `ksud` needs `libclang` for bindgen and an AArch64 assembler for its LKM
@@ -79,6 +81,7 @@ on:
         options:
           - kernelsu
           - kernelsu-next
+          - resukisu
         default: kernelsu
       ksu_ref:
         description: 'Tag to build (needs a matching kernelsu/patches/<name>-<ref>-*.patch)'
@@ -134,21 +137,33 @@ permissions:
 
 env:
   FLAVOR: ${{ inputs.flavor || 'kernelsu' }}
-  # The two flavours live in different repositories and their tags only happen to share a name, so
-  # the repository, the patch and the artifact names all follow the flavour rather than being fixed.
-  FLAVOR_REPO: ${{ (inputs.flavor || 'kernelsu') == 'kernelsu-next' && 'KernelSU-Next/KernelSU-Next' || 'tiann/KernelSU' }}
-  FLAVOR_PATCH: ${{ (inputs.flavor || 'kernelsu') == 'kernelsu-next' && 'KernelSU-Next' || 'KernelSU' }}
-  # Distinguishes the files this flavour publishes from the other flavour's, so both can be served
-  # for one target without either clobbering the other.
-  FLAVOR_SUFFIX: ${{ (inputs.flavor || 'kernelsu') == 'kernelsu-next' && '-next' || '' }}
+  # The three flavours live in different repositories and their tags only happen to share a name, so
+  # the repository, the patch, the artifact names and the build flags all follow the flavour rather
+  # than being fixed. They are looked up in one map each - a nested ternary per value was already at
+  # the edge of readable with two flavours, and a fourth would be a place to make a mistake.
+  FLAVOR_REPO: ${{ fromJSON('{"kernelsu":"tiann/KernelSU","kernelsu-next":"KernelSU-Next/KernelSU-Next","resukisu":"ReSukiSU/ReSukiSU"}')[inputs.flavor || 'kernelsu'] }}
+  FLAVOR_PATCH: ${{ fromJSON('{"kernelsu":"KernelSU","kernelsu-next":"KernelSU-Next","resukisu":"ReSukiSU"}')[inputs.flavor || 'kernelsu'] }}
+  # Distinguishes the files this flavour publishes from the others', so all three can be served for
+  # one target without any clobbering another. The kernel half is always embedded by its daemon as
+  # `<kmi>_kernelsu.ko` - all three flavours come from KernelSU's lineage - so this is a published
+  # name only.
+  FLAVOR_SUFFIX: ${{ fromJSON('{"kernelsu":"","kernelsu-next":"-next","resukisu":"-rsksu"}')[inputs.flavor || 'kernelsu'] }}
   KSU_REF: ${{ inputs.ksu_ref || 'v3.3.0' }}
-  PATCH: kernelsu/patches/${{ (inputs.flavor || 'kernelsu') == 'kernelsu-next' && 'KernelSU-Next' || 'KernelSU' }}-${{ inputs.ksu_ref || 'v3.3.0' }}-samsung-kdp-rkp-defex.patch
+  PATCH: kernelsu/patches/${{ fromJSON('{"kernelsu":"KernelSU","kernelsu-next":"KernelSU-Next","resukisu":"ReSukiSU"}')[inputs.flavor || 'kernelsu'] }}-${{ inputs.ksu_ref || 'v3.3.0' }}-samsung-kdp-rkp-defex.patch
   # How `ksud` has to be asked for. KernelSU is one Cargo workspace at its root, so its package is
-  # selected by name; KernelSU-Next has no workspace at all - `ksud` and `ksuinit` are separate
-  # crates under `userspace/`, each with its own lockfile - and its own `build.sh` builds `ksud` by
+  # selected by name; the other two have no workspace at all - `ksud` and `ksuinit` are separate
+  # crates under `userspace/`, each with its own lockfile - and their own `build.sh` builds `ksud` by
   # manifest path. That also moves the binary: a workspace member lands in the root `target/`, a
   # standalone crate in its own, which is why the steps below locate it instead of naming it.
-  CARGO_ARGS: ${{ (inputs.flavor || 'kernelsu') == 'kernelsu-next' && '--manifest-path userspace/ksud/Cargo.toml' || '-p ksud' }}
+  CARGO_ARGS: ${{ fromJSON('{"kernelsu":"-p ksud","kernelsu-next":"--manifest-path userspace/ksud/Cargo.toml","resukisu":"--manifest-path userspace/ksud/Cargo.toml"}')[inputs.flavor || 'kernelsu'] }}
+  # The make variables beyond the Samsung ones this flavour's own DDK build passes.
+  #
+  # ReSukiSU selects its syscall hook through `CONFIG_KSU_TRACEPOINT_HOOK`, and none of its three hook
+  # backends is compiled without one of those selects - its own `ddk-lkm.yml` passes exactly this pair
+  # (`CONFIG_KSU_TRACEPOINT_HOOK=y CONFIG_KSU_MULTI_MANAGER_SUPPORT=y`), so a build without them is not
+  # the configuration the project tests. KernelSU and KernelSU-Next compile the same files with no
+  # flag at all, which is why this is empty for them rather than a shared value.
+  FLAVOR_CONFIG: ${{ fromJSON('{"kernelsu":"","kernelsu-next":"","resukisu":"CONFIG_KSU_TRACEPOINT_HOOK=y CONFIG_KSU_MULTI_MANAGER_SUPPORT=y"}')[inputs.flavor || 'kernelsu'] }}
 
 jobs:
   # ---------------------------------------------------------------------------------------------
@@ -346,6 +361,7 @@ jobs:
           CONFIG_KSU_SAMSUNG_KDP=y \
           CONFIG_KSU_SAMSUNG_RKP=y \
           CONFIG_KSU_SAMSUNG_DEFEX=y \
+          ${{ env.FLAVOR_CONFIG }} \
           ${{ matrix.no_patch_text && 'CONFIG_KSU_SAMSUNG_NO_PATCH_TEXT=y' || '' }} \
           CC=clang make -j"$(nproc)" 2>&1 | tee /tmp/kbuild.log
 
@@ -357,7 +373,15 @@ jobs:
           echo "after strip:"; ls -l kernelsu.ko
 
       - name: The version has to have come from the tag
-        run: python3 tools/check_kernel_version.py --log /tmp/kbuild.log --tree KernelSU
+        run: |
+          # The flavour table first, because it is what decides which arithmetic the number below is
+          # read with: an offset wrong by 700 accepts a build the manager can never pair itself with.
+          python3 tools/check_kernel_version.py --self-test
+          # `--flavor` also holds the log to the project this run asked for, so a build that names
+          # another flavour is refused as a build from the wrong repository rather than checked
+          # against the wrong arithmetic.
+          python3 tools/check_kernel_version.py --log /tmp/kbuild.log --tree KernelSU \
+            --flavor "${{ env.FLAVOR }}"
 
       - name: Upload kernelsu.ko
         uses: actions/upload-artifact@v7
@@ -496,6 +520,7 @@ jobs:
           CONFIG_KSU_SAMSUNG_KDP=y \
           CONFIG_KSU_SAMSUNG_RKP=y \
           CONFIG_KSU_SAMSUNG_DEFEX=y \
+          ${{ env.FLAVOR_CONFIG }} \
           CC=clang make -j"$(nproc)" 2>&1 | tee /tmp/kbuild.log
 
           echo "=== vermagic must be the target's ==="
@@ -514,6 +539,7 @@ jobs:
           # checkout. `--ref` records what this run asked for, which `check_pair_version.py` then holds
           # the daemon to.
           python3 tools/check_kernel_version.py --log /tmp/kbuild.log --tree KernelSU \
+            --flavor "${{ env.FLAVOR }}" \
             --ref "${{ env.KSU_REF }}" --receipt module-version.txt
 
       - name: Diff the imports against the device-tested module
@@ -694,6 +720,7 @@ jobs:
             --module-receipt /tmp/pair/module-version.txt \
             --daemon-tree KernelSU \
             --daemon-binary "$binary" \
+            --flavor "${{ env.FLAVOR }}" \
             --ref "${{ env.KSU_REF }}" \
             --receipt daemon-version.txt
 
@@ -778,6 +805,7 @@ jobs:
             --module-receipt kernelsu/module-version.txt \
             --daemon-receipt kernelsu/daemon-version.txt \
             --daemon-binary "$daemon" \
+            --flavor "${{ env.FLAVOR }}" \
             --ref "${{ env.KSU_REF }}"
 
       - name: Point the feed at the pair

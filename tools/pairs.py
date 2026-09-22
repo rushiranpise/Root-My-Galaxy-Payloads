@@ -32,9 +32,13 @@ import sys
 # everything before the first space; the rest is the kernel's own configuration trailer.
 VERMAGIC = re.compile(rb"vermagic=([^ \x00]+)")
 
-# `<kmi>_kernelsu[-next]-<target>-kdp.ko`, plus the older names that stop at the target.
+# `<kmi>_kernelsu[-next|-rsksu]-<target>-kdp.ko`, plus the older names that stop at the target.
+#
+# The kernel half is always called `_kernelsu`: all three flavours are KernelSU's lineage and each one
+# looks for that exact asset name in its daemon's own bin directory (`format!("{kmi}_kernelsu.ko")`),
+# so the suffix here distinguishes the *published* files, not the embedded ones.
 MODULE = re.compile(
-    r"^(?P<kmi>android\d+-\d+\.\d+(?:\.\d+)?)_kernelsu(?P<suffix>-next)?-(?P<target>.+?)(?:-kdp)?\.ko$"
+    r"^(?P<kmi>android\d+-\d+\.\d+(?:\.\d+)?)_kernelsu(?P<suffix>-next|-rsksu)?-(?P<target>.+?)(?:-kdp)?\.ko$"
 )
 # The DDK publishes one image per KMI *family* - `android13-5.15`, `android15-6.6` - and never per
 # release, while a module may be named with either. `android13-5.15.189_kernelsu-dm2q-...` is a
@@ -43,16 +47,22 @@ MODULE = re.compile(
 # that causes is a container pull before any step runs, which reads as a missing manifest rather
 # than as a tag this repository asked for by mistake.
 DDK_KMI = re.compile(r"^(?P<family>android\d+-\d+\.\d+)")
-# `ksud[-next]-<target>-kdp`.
-DAEMON = re.compile(r"^ksud(?P<suffix>-next)?-(?P<target>.+?)-kdp$")
-# The version a payload id carries: `pa3q-S938USQSCCZF9-ksu330`.
-VERSIONED_ID = re.compile(r"^(?P<prefix>.+?)-(?P<flavour>ksun?)(?P<version>\d+)$")
+# `ksud[-next|-rsksu]-<target>-kdp`.
+DAEMON = re.compile(r"^ksud(?P<suffix>-next|-rsksu)?-(?P<target>.+?)-kdp$")
+# The version a payload id carries: `pa3q-S938USQSCCZF9-ksu330`, `pa3q-...-ksun340`,
+# `pa3q-...-rsksu420`. The prefix names the flavour the same way the artifact suffix does, which is
+# what lets an id be read back into the pair it serves.
+VERSIONED_ID = re.compile(r"^(?P<prefix>.+?)-(?P<flavour>rsksu|ksun?)(?P<version>\d+)$")
 # A build tree's own release rather than a device's: `6.6.127-4k-g46a034eca005-dirty`.
 BUILD_TREE = re.compile(r"-g[0-9a-f]{7,}(-dirty)?$")
 # The version a pair-built daemon carries: `3.4.0 (uapi: 4)`, which is `ksud -V`'s own answer.
 DAEMON_VERSION = re.compile(rb"(\d+\.\d+\.\d+) \(uapi: \d+\)")
 
-FLAVOURS = {"": "kernelsu", "-next": "kernelsu-next"}
+# The artifact suffix each flavour publishes under, and the id a feed entry declares for it. The two
+# are not the same string (`-rsksu` against `resukisu`) because the first is a file name and the second
+# is what `KernelSuFlavor.id` in the app compares, and a feed that named the wrong one would offer a
+# device a daemon built for another kernel.
+FLAVOURS = {"": "kernelsu", "-next": "kernelsu-next", "-rsksu": "resukisu"}
 # `S938USQSCCZF9`: the build id in a payload id or a target id.
 BUILD_ID = re.compile(r"^[a-z0-9]+-[A-Z][A-Z0-9]{6,}$")
 
@@ -275,7 +285,7 @@ def plan(repo: str, feed: str = "support/targets-v3.json") -> dict:
         # daemon's own target, or the payload id, which for a shared hand-built pair is
         # `<device>-<build>` and is therefore the only place that build is written down.
         # The version a payload id may carry is a suffix, not part of the build it names.
-        without_version = re.sub(r"-(ksu|ksun)\d+$", "", payload_id)
+        without_version = re.sub(r"-(rsksu|ksun?)\d+$", "", payload_id)
         from_id = without_version if BUILD_ID.match(without_version) else ""
         candidate_target = target if "-" in target else from_id
         build = candidate_target.split("-", 1)[1] if "-" in candidate_target else ""
@@ -283,7 +293,7 @@ def plan(repo: str, feed: str = "support/targets-v3.json") -> dict:
         kmi_from_release = kmi_for_release(documented, os.listdir(artifacts)) if documented else None
 
         if documented and kmi_from_release:
-            own_daemon = f"ksud{'-next' if suffix else ''}-{candidate_target}-kdp"
+            own_daemon = f"ksud{suffix}-{candidate_target}-kdp"
             migrations.append(
                 {
                     "targetId": candidate_target,
@@ -399,6 +409,49 @@ def self_test(repo: str = ".", feed: str = "support/targets-v3.json") -> int:
         if family not in DDK_FAMILIES.values():
             print(f"  {name}: resolves to {family}, which no DDK image is published under")
             failures += 1
+
+    # One name per flavour, so a suffix that stops being recognised is caught here rather than as a
+    # pair that quietly disappears from the plan - a flavour whose daemon no longer parses is an entry
+    # reported as "not named for a target" and never rebuilt again.
+    named_cases = (
+        ("android15-6.6_kernelsu-pa3q-S938USQSCCZF9-kdp.ko", "", "kernelsu", "pa3q-S938USQSCCZF9"),
+        ("android15-6.6_kernelsu-next-pa3q-S938USQSCCZF9-kdp.ko", "-next", "kernelsu-next", "pa3q-S938USQSCCZF9"),
+        ("android15-6.6_kernelsu-rsksu-pa3q-S938USQSCCZF9-kdp.ko", "-rsksu", "resukisu", "pa3q-S938USQSCCZF9"),
+    )
+    for name, suffix, flavour, target in named_cases:
+        match = MODULE.match(name)
+        if not match or (match.group("suffix") or "") != suffix or match.group("target") != target:
+            print(f"  {name}: not read as {flavour}'s module for {target}")
+            failures += 1
+        if FLAVOURS.get(suffix) != flavour:
+            print(f"  {suffix!r}: expected the {flavour} flavour, got {FLAVOURS.get(suffix)!r}")
+            failures += 1
+
+    for name, suffix, target in (
+        ("ksud-pa3q-S938USQSCCZF9-kdp", "", "pa3q-S938USQSCCZF9"),
+        ("ksud-next-pa3q-S938USQSCCZF9-kdp", "-next", "pa3q-S938USQSCCZF9"),
+        ("ksud-rsksu-pa3q-S938USQSCCZF9-kdp", "-rsksu", "pa3q-S938USQSCCZF9"),
+    ):
+        match = DAEMON.match(name)
+        if not match or (match.group("suffix") or "") != suffix or match.group("target") != target:
+            print(f"  {name}: not read as a daemon for {target}")
+            failures += 1
+
+    # The id a resukisu entry carries has to be readable back into the pair it serves, and its prefix
+    # must not be mistaken for KernelSU's (`ksu`/`ksun` do not match `rsksu`, which is why it is an
+    # alternative rather than a substring).
+    for payload_id, flavour, version in (
+        ("pa3q-S938USQSCCZF9-ksu330", "ksu", "330"),
+        ("pa3q-S938USQSCCZF9-ksun340", "ksun", "340"),
+        ("pa3q-S938USQSCCZF9-rsksu420", "rsksu", "420"),
+    ):
+        match = VERSIONED_ID.match(payload_id)
+        if not match or (match.group("flavour"), match.group("version")) != (flavour, version):
+            print(f"  {payload_id}: not read as a {flavour} id at {version}")
+            failures += 1
+    if re.sub(r"-(rsksu|ksun?)\d+$", "", "pa3q-S938USQSCCZF9-rsksu420") != "pa3q-S938USQSCCZF9":
+        print("  a resukisu payload id keeps its version suffix, so its build cannot be recovered")
+        failures += 1
 
     # The name a release publishes under, which is the one thing standing between a documented build
     # and a pair of its own. The two forms are here because both are in the repository, and the choice

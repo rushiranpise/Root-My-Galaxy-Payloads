@@ -4,6 +4,10 @@ name: Upstream KernelSU
 #
 # A KernelSU release needs three things done, and this does all three without a person:
 #
+# Flavours watched: KernelSU, KernelSU-Next and ReSukiSU. Each has its own repository, its own tag
+# namespace and its own arithmetic for the version it stamps (ReSukiSU is 700 above the other two), and
+# each is rebased and rebuilt on its own - a release in one is no reason to rebuild the others.
+#
 #   1. **A patch for the new tag.** The Samsung delta is carried as a patch keyed by tag, so a
 #      release nobody has rebased onto cannot build at all. `tools/rebase_patch.py` carries the
 #      newest patch forward: unchanged, or by three-way merge, or by resolving the conflicts where
@@ -29,7 +33,7 @@ on:
   workflow_dispatch:
     inputs:
       flavor:
-        description: 'Only this flavour, instead of both (kernelsu or kernelsu-next)'
+        description: 'Only this flavour, instead of all three (kernelsu, kernelsu-next or resukisu)'
         required: false
         type: string
         default: ''
@@ -84,14 +88,49 @@ jobs:
           set -o pipefail
           echo '{}' > /tmp/refs.json
 
-          for flavor in kernelsu kernelsu-next; do
+          # Where each flavour's releases come from, and the name its patches and artifacts carry.
+          # The second is not always the first's last path segment - `KernelSU-Next/KernelSU-Next`
+          # against `KernelSU-Next` is a coincidence - so both are written down.
+          flavour_repo() {
+            case "$1" in
+              kernelsu) echo tiann/KernelSU ;;
+              kernelsu-next) echo KernelSU-Next/KernelSU-Next ;;
+              resukisu) echo ReSukiSU/ReSukiSU ;;
+            esac
+          }
+          flavour_name() {
+            case "$1" in
+              kernelsu) echo KernelSU ;;
+              kernelsu-next) echo KernelSU-Next ;;
+              resukisu) echo ReSukiSU ;;
+            esac
+          }
+
+          for flavor in kernelsu kernelsu-next resukisu; do
             if [ -n "$ONLY" ] && [ "$ONLY" != "$flavor" ]; then continue; fi
-            repo=$([ "$flavor" = "kernelsu-next" ] && echo KernelSU-Next/KernelSU-Next || echo tiann/KernelSU)
-            name=$([ "$flavor" = "kernelsu-next" ] && echo KernelSU-Next || echo KernelSU)
+            repo=$(flavour_repo "$flavor")
+            name=$(flavour_name "$flavor")
 
             # The newest *release*, not the newest tag: an unreleased tag is a commit someone is
             # still working on, and publishing a pair from it would be publishing a moving tree.
-            tag=$(gh release view --repo "$repo" --json tagName -q .tagName)
+            #
+            # A project that has published only pre-releases has no newest release at all - GitHub
+            # answers `release not found` for ReSukiSU, every release of which is marked
+            # pre-release - so its newest tag is the fallback. A tag is immutable either way, which
+            # is what the rule above protects; what is given up is the distinction between a release
+            # and a tag nobody announced. `|| true` because the fallback is the point, and a failure
+            # that exited the step here would take the other flavours' checks down with it.
+            tag=$(gh release view --repo "$repo" --json tagName -q .tagName 2>/dev/null || true)
+            if [ -z "$tag" ]; then
+              tag=$(git ls-remote --tags --refs "https://github.com/$repo" \
+                | sed 's#.*refs/tags/##' | sort -V | tail -1)
+              echo "$flavor publishes no released version; its newest tag is $tag"
+            fi
+            if [ -z "$tag" ]; then
+              echo "::error::$flavor has neither a release nor a tag to build"
+              echo "::endgroup::"
+              continue
+            fi
             patch="kernelsu/patches/$name-$tag-samsung-kdp-rkp-defex.patch"
             echo "::group::$flavor is on $tag"
 

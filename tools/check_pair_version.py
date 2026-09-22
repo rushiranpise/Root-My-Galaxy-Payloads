@@ -9,6 +9,12 @@ builds, from the same underlying fact:
 | module | `kernel/Kbuild` | `30000 + git rev-list --count HEAD`, printed as `-- KernelSU-Next version:` |
 | daemon | `userspace/ksud/build.rs` | the same `30000 + count` as `VERSION_CODE`, and `VERSION_NAME` from `git describe --tags --always` with a leading `v` stripped |
 
+ReSukiSU's two halves do the same thing with one difference, and it is why the flavour is an input:
+both add 700 to that count (`30000 + $(KSU_LOCAL_VERSION) + 700`, and
+`let version_code = 30000 + 700 + version_code; // For historical reasons`), so a pair built there
+reports 30700 + commits. The offset comes from `check_kernel_version.FLAVOURS`, which is also where
+the module half gets it, so the two tools cannot disagree about it.
+
 Both read the commit count of the tree they are built in, so on the same commit they agree by
 construction - and that is exactly why nothing checked them. The two halves are built in different
 jobs, from different clones, and the job that publishes them has neither. Every way a pair ends up
@@ -51,7 +57,14 @@ from dataclasses import dataclass
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from check_kernel_version import VERSION_BASE, commits_at, exact_tag, head, is_shallow  # noqa: E402
+from check_kernel_version import (  # noqa: E402
+    FLAVOURS,
+    commits_at,
+    exact_tag,
+    expected_version,
+    head,
+    is_shallow,
+)
 
 # `v3.4.0-4-g1a879d6a`, which is what `git describe` answers for a commit past the tag.
 SUFFIXED = re.compile(r"-\d+-g[0-9a-f]+$")
@@ -118,12 +131,13 @@ def check_binary(name: str, binary: str) -> None:
     print(f"  {os.path.basename(binary)} carries {name}")
 
 
-def daemon_stamp(receipt: str | None, tree: str | None, binary: str | None) -> Stamp:
+def daemon_stamp(receipt: str | None, tree: str | None, binary: str | None, flavour: str = "kernelsu") -> Stamp:
     """The daemon's version, from the receipt when publishing and from the tree when building.
 
     The tree is preferred because it is where the number actually comes from: `build.rs` reads
     `git rev-list --count HEAD` and `git describe --tags --always` of the checkout it compiles in,
-    and this reads the same two things rather than a transcription of them.
+    and this reads the same two things rather than a transcription of them. Which project's
+    arithmetic that count is in is [flavour]'s business - see [expected_version].
     """
     if tree is None:
         if receipt is None:
@@ -143,7 +157,8 @@ def daemon_stamp(receipt: str | None, tree: str | None, binary: str | None) -> S
 
     if is_shallow(tree):
         raise SystemExit(
-            f"{tree} is a shallow clone, so it counts 1 commit and would stamp {VERSION_BASE + 1}.\n"
+            f"{tree} is a shallow clone, so it counts 1 commit and would stamp "
+            f"{expected_version(flavour, 1)}.\n"
             "Fetch the whole history for the tag this pair is built from."
         )
     count = commits_at(tree)
@@ -159,7 +174,7 @@ def daemon_stamp(receipt: str | None, tree: str | None, binary: str | None) -> S
     # `trim_start_matches('v')` in build.rs strips every leading `v`, so this does too.
     name = described.lstrip("v")
 
-    version = VERSION_BASE + count
+    version = expected_version(flavour, count)
     tag = exact_tag(tree)
 
     if binary is not None:
@@ -227,8 +242,9 @@ def explain(reason: str, module: Stamp, daemon: Stamp, ref: str | None) -> str:
     if reason == "version":
         return (
             f"the module reports {module.version} and the daemon would report {daemon.version}.\n"
-            "  Both are 30000 + the commit count of the tree they were built in, so the two jobs built\n"
-            "  different commits — the usual cause is a branch given as the ref, resolved twice."
+            "  Both are this project's base plus the commit count of the tree they were built in, so the\n"
+            "  two jobs built different commits — the usual cause is a branch given as the ref, resolved\n"
+            "  twice — or the two halves were built from different projects' arithmetic."
         )
     if reason == "commit":
         return (
@@ -368,6 +384,20 @@ def self_test() -> int:
             print(f"  {'refused' if expected else 'accepted'}: {label}" + (f" ({found})" if found else ""))
 
     print(f"{len(cases) - failures}/{len(cases)} cases")
+
+    # The offset, held against the module half's own table rather than against a second copy of the
+    # same constant: a pair built by ReSukiSU is exactly 700 above a KernelSU pair at one commit, and
+    # a check read with the wrong arithmetic is off by that much on every build.
+    for commits in (0, 1, 3514):
+        gap = expected_version("resukisu", commits) - expected_version("kernelsu", commits)
+        if gap != FLAVOURS["resukisu"][1]:
+            print(f"FAILED: resukisu at {commits} commits is {gap} above kernelsu, not 700")
+            failures += 1
+    if FLAVOURS["kernelsu-next"][1] != 0:
+        print("FAILED: kernelsu-next is not on the shared base")
+        failures += 1
+    print(f"offsets: {', '.join(f'{name}+{offset}' for name, (_project, offset) in sorted(FLAVOURS.items()))}")
+
     return 1 if failures else 0
 
 
@@ -379,6 +409,12 @@ def main() -> int:
     parser.add_argument("--daemon-receipt", help="the daemon's own receipt, when its tree is gone")
     parser.add_argument("--daemon-binary", help="the built daemon, to check the name inside it")
     parser.add_argument("--ref", help="the tag this run is building, e.g. v3.4.0")
+    parser.add_argument(
+        "--flavor",
+        default="kernelsu",
+        choices=sorted(FLAVOURS),
+        help="whose arithmetic the daemon's number is in",
+    )
     parser.add_argument("--receipt", help="write the daemon's receipt where publish can read it")
     arguments = parser.parse_args()
 
@@ -388,7 +424,9 @@ def main() -> int:
         parser.error("give --module-receipt, or --self-test")
 
     module = module_stamp(arguments.module_receipt)
-    daemon = daemon_stamp(arguments.daemon_receipt, arguments.daemon_tree, arguments.daemon_binary)
+    daemon = daemon_stamp(
+        arguments.daemon_receipt, arguments.daemon_tree, arguments.daemon_binary, arguments.flavor
+    )
     ref = arguments.ref or module.ref or None
 
     if arguments.receipt:
