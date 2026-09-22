@@ -202,6 +202,14 @@ jobs:
           # The patch the detect job committed, which is what these pairs are built against.
           ref: ${{ github.ref_name }}
 
+      - name: The derivation still holds
+        run: |
+          # Seconds, and it is the only thing that reads the two claims this run is about to act on:
+          # the name a documented release publishes under, and the version each entry declares held
+          # against the version stamped into the daemon it serves. Both were defects before they were
+          # checks, and neither is visible from a build that succeeds.
+          python3 tools/pairs.py --repo . --self-test
+
       - name: Derive the pairs
         id: matrix
         env:
