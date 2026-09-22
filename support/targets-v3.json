@@ -396,6 +396,27 @@
         "sha256": "b3fbde46ed8707a1f3af12666e5189d0228d2762ed16e9c21bc6ef8c58f70fc0",
         "version": "3.4.0"
       }
+    },
+    {
+      "payloadId": "pa3q-S938USQSCCZF9-rsksu420",
+      "displayName": "Galaxy S25 Ultra | ReSukiSU 4.2.0-rc2 (test)",
+      "models": [
+        "SM-S938U1"
+      ],
+      "kernelVersions": [
+        "6.6.98"
+      ],
+      "flavor": "resukisu",
+      "exploit": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/artifacts/pa3q-S938NKSUACZF1/cve-2026-43499-app.so",
+        "size": 126848
+      },
+      "kernelsu": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-rsksu-pa3q-S938USQSCCZF9-kdp",
+        "size": 4349384,
+        "sha256": "59d01b4d81669c699ee000564f0bab4c29948d34dba29c52c7bd2e8f82eda2e9",
+        "version": "4.2.0-rc2"
+      }
     }
   ]
 }
