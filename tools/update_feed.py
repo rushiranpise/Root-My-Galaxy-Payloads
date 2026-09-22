@@ -17,6 +17,12 @@ Two shapes of change, and the difference matters:
 
 A URL is never rewritten from scratch: the existing one supplies its own prefix, which is how
 the app's allowed-repository rule is satisfied, and the file name is the only part replaced.
+
+It also writes `kernelsu.version`: the release the daemon beside it was built from. The payload id
+spells that version into a name (`ksun340`), but a name is not a fact the app can compare against a
+manager's own version, and the app needs it to offer the manager that belongs to the KernelSU a run
+will actually stage. `--backfill` writes that field for entries whose id already carries a version
+and which are not being rebuilt.
 """
 
 from __future__ import annotations
@@ -78,7 +84,49 @@ def _entry_spans(text: str) -> list[tuple[int, int, dict]]:
         position = end
 
 
-def _rewrite_entry(body: str, entry: dict, daemon: str, size: int, sha256: str, url_prefix: str | None) -> str:
+def _with_version(entry: str, version: str) -> str:
+    """The entry, with its `kernelsu` block declaring `version`.
+
+    Sliced from the `"kernelsu"` key rather than from the entry's start: the exploit's object is the
+    one that closes first, so taking the first brace in the entry writes the version into the wrong
+    block - which is a mistake this function exists to make once instead of twice.
+    """
+    start = entry.index('"kernelsu"')
+    block, rest = entry[start:].split("}", 1)
+    return entry[:start] + _set_version(block + "}", version) + rest
+
+
+def _set_version(block: str, version: str) -> str:
+    """Puts `"version"` into a `kernelsu` block, or points an existing one at this release.
+
+    `block` starts at the `"kernelsu"` key, so the object's own closing brace is the first one in it.
+    The new field is written on its own line at the indentation of the fields above it, so the diff of
+    a release is the lines that changed and not a reformatted entry.
+    """
+    closing = block.index("}")
+    head, rest = block[:closing], block[closing:]
+    if re.search(r'"version"\s*:', head):
+        return re.sub(r'("version"\s*:\s*")[^"]*(")', r"\g<1>" + version + r"\g<2>", head, count=1) + rest
+    fields = list(re.finditer(r'\n(\s+)"(?:url|size|sha256)"\s*:', head))
+    if not fields:
+        return block
+    indent = fields[-1].group(1)
+    body = head.rstrip()
+    trailing = head[len(body):]
+    if body.endswith(","):
+        body = body[:-1]
+    return body + f',\n{indent}"version": "{version}"' + trailing + rest
+
+
+def _rewrite_entry(
+    body: str,
+    entry: dict,
+    daemon: str,
+    size: int,
+    sha256: str,
+    url_prefix: str | None,
+    version: str | None,
+) -> str:
     """One entry, with only the values that changed replaced."""
     artifact = entry["kernelsu"]
     old_url = artifact["url"]
@@ -118,6 +166,9 @@ def _rewrite_entry(body: str, entry: dict, daemon: str, size: int, sha256: str, 
                     1,
                 )
         tail = digest
+    if version:
+        # `tail` starts at the `"kernelsu"` key, which is what _with_version slices from.
+        tail = _with_version(tail, version.lstrip("vV"))
     return head + tail
 
 
@@ -156,7 +207,7 @@ def apply(
         if not republish and not (migrate and entry.get("payloadId") in targets):
             continue
 
-        body = _rewrite_entry(text[start:end], entry, daemon, size, sha256, url_prefix)
+        body = _rewrite_entry(text[start:end], entry, daemon, size, sha256, url_prefix, version)
         payload_id = entry.get("payloadId", "")
         after_id = payload_id
         display = entry.get("displayName", "")
@@ -214,10 +265,137 @@ def apply(
     # mistake that would only show up as a failed run on a user's phone.
     for entry in result.get("payloads", []):
         artifact = entry["kernelsu"]
-        if os.path.basename(artifact["url"]) == daemon and artifact["size"] != size:
+        if os.path.basename(artifact["url"]) != daemon:
+            continue
+        if artifact["size"] != size:
             raise SystemExit(f"{entry.get('payloadId')} still declares size {artifact['size']}")
+        # The version is what the app offers a manager from, so an entry serving this pair while
+        # naming another release is the same class of mistake as a relayed size.
+        if version and artifact.get("version") != version.lstrip("vV"):
+            raise SystemExit(
+                f"{entry.get('payloadId')} declares KernelSU {artifact.get('version')!r}, "
+                f"not {version.lstrip('vV')!r}"
+            )
 
     if not dry_run:
+        with open(path, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(updated)
+
+    return changes
+
+
+SELF_TEST_ENTRY = """    {
+      "payloadId": "pa3q-S938USQSCCZF9-ksun340",
+      "displayName": "Galaxy S25 Ultra | KernelSU-Next 3.4.0 (test)",
+      "models": ["SM-S938U1"],
+      "kernelVersions": ["6.6.98"],
+      "flavor": "kernelsu-next",
+      "exploit": {
+        "url": "https://raw.githubusercontent.com/example/artifacts/pa3q/cve.so",
+        "size": 104128
+      },
+      "kernelsu": {
+        "url": "https://raw.githubusercontent.com/example/kernelsu/ksud-next-kdp",
+        "size": 4227792,
+        "sha256": "31beb817deb8e4b0945ca23d47a79fd4967984dde05ce914bd4c47d29553c9c0"
+      }
+    }"""
+
+
+def self_test() -> int:
+    """The version write and the naming it comes from, checked without a feed or a rebuild.
+
+    The case worth having here is the block: an entry's exploit object closes before the `kernelsu` one,
+    so a version written from the entry's first brace lands on the exploit - which parses, reads as a
+    harmless extra field, and would only be noticed by the app quietly ignoring it.
+    """
+    failures = 0
+
+    written = _with_version(SELF_TEST_ENTRY, "3.4.0")
+    parsed = json.loads(written)
+    if parsed.get("kernelsu", {}).get("version") != "3.4.0":
+        print(f"  version landed outside the kernelsu block: {parsed.get('exploit')}")
+        failures += 1
+    if "version" in parsed.get("exploit", {}):
+        print("  the exploit block was given a KernelSU version")
+        failures += 1
+    if parsed.get("kernelsu", {}).get("size") != 4227792:
+        print("  the size beside it was rewritten")
+        failures += 1
+    # Rewriting an entry that already declares one points it at the new release rather than adding a
+    # second field to an object that can only have one.
+    if json.loads(_with_version(written, "3.5.0"))["kernelsu"]["version"] != "3.5.0":
+        print("  an existing version was not replaced")
+        failures += 1
+    if written.count('"version"') != 1:
+        print(f"  the version was written {written.count(chr(34) + 'version' + chr(34))} times")
+        failures += 1
+
+    for payload_id, expected in (
+        ("pa3q-S938USQSCCZF9-ksun340", "3.4.0"),
+        ("pa3q-S938USQSCCZF9-ksu330", "3.3.0"),
+        ("dm1q-S911U1UES6DYI3", None),
+        ("galaxy-s25-series-2026-06-07", None),
+    ):
+        suffix = _suffix_of(payload_id)
+        actual = _version_text(suffix[1]) if suffix else None
+        if actual != expected:
+            print(f"  {payload_id}: expected {expected}, got {actual}")
+            failures += 1
+
+    print(f"self-test: 1 entry shape, 4 payload ids, {failures} failure(s)")
+    return 1 if failures else 0
+
+
+def backfill(repo: str, feed: str, dry_run: bool) -> list[dict]:
+    """Writes the version every entry already spells into its payload id.
+
+    The field is new, and an entry is only rewritten when the pair it serves is rebuilt - so a feed that
+    gained the field would keep serving `pa3q-...-ksun340` without saying 3.4.0 anywhere the app reads it.
+    The id is where that fact already is: this same tool wrote it from the tag the pair was built from,
+    which is why the two agreeing is the check here rather than a guess.
+
+    An entry whose id carries no version is left alone, and an entry that declares a different version
+    than its id is refused: the two are written from one fact, so a disagreement means one of them was
+    edited by hand and the app would be offered a manager for a KernelSU nothing else names.
+    """
+    path = os.path.join(repo, feed)
+    with open(path, encoding="utf-8") as handle:
+        text = handle.read()
+    rebuilt: list[str] = []
+    changes: list[dict] = []
+    cursor = 0
+
+    for start, end, entry in _entry_spans(text):
+        artifact = entry.get("kernelsu")
+        suffix = _suffix_of(entry.get("payloadId", ""))
+        if not isinstance(artifact, dict) or not suffix:
+            continue
+        version = _version_text(suffix[1])
+        if not version:
+            continue
+        declared = artifact.get("version")
+        if declared == version:
+            continue
+        if declared:
+            raise SystemExit(
+                f"{entry.get('payloadId')} declares {declared} while its id says {version}"
+            )
+        body = _with_version(text[start:end], version)
+        rebuilt.append(text[cursor:start])
+        rebuilt.append(body)
+        cursor = end
+        changes.append(
+            {
+                "before": {"payloadId": entry.get("payloadId"), "version": declared},
+                "after": {"payloadId": entry.get("payloadId"), "displayName": entry.get("displayName"), "version": version},
+            }
+        )
+
+    if changes and not dry_run:
+        rebuilt.append(text[cursor:])
+        updated = "".join(rebuilt)
+        json.loads(updated)
         with open(path, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(updated)
 
@@ -228,7 +406,13 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", default=".", help="payload repository root")
     parser.add_argument("--feed", default="support/targets-v3.json")
-    parser.add_argument("--daemon", required=True, help="file name of the daemon that was built")
+    parser.add_argument(
+        "--backfill",
+        action="store_true",
+        help="write kernelsu.version for entries whose payload id already carries one",
+    )
+    parser.add_argument("--self-test", action="store_true", help="check the version write and stop")
+    parser.add_argument("--daemon", help="file name of the daemon that was built")
     parser.add_argument("--artifact", help="path to the built daemon, to read its size and digest")
     parser.add_argument("--size", type=int)
     parser.add_argument("--sha256")
@@ -238,6 +422,22 @@ def main() -> int:
     parser.add_argument("--url-prefix", help="repository raw-URL prefix this run publishes under")
     parser.add_argument("--dry-run", action="store_true")
     arguments = parser.parse_args()
+
+    if arguments.self_test:
+        return self_test()
+
+    if arguments.backfill:
+        changes = backfill(repo=arguments.repo, feed=arguments.feed, dry_run=arguments.dry_run)
+        for change in changes:
+            print(f"{change['before']['payloadId']}: version {change['after']['version']}")
+        print(
+            f"{len(changes)} feed entr{'y' if len(changes) == 1 else 'ies'} "
+            f"given a version{' (dry run)' if arguments.dry_run else ''}"
+        )
+        return 0
+
+    if not arguments.daemon:
+        parser.error("give --daemon, or --backfill")
 
     size, sha256 = arguments.size, arguments.sha256
     if arguments.artifact:

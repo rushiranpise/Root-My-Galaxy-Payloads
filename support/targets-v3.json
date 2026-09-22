@@ -359,7 +359,8 @@
       "kernelsu": {
         "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-pa3q-S938USQSCCZF9-kdp",
         "size": 5095160,
-        "sha256": "15d4741b59ae5a38a65355f77b368e3ee6e44ef64cead4f97bbe293afd68858f"
+        "sha256": "15d4741b59ae5a38a65355f77b368e3ee6e44ef64cead4f97bbe293afd68858f",
+        "version": "3.3.0"
       }
     },
     {
@@ -375,7 +376,8 @@
       "kernelsu": {
         "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-next-pa3q-S938USQSCCZF9-kdp",
         "size": 4227792,
-        "sha256": "31beb817deb8e4b0945ca23d47a79fd4967984dde05ce914bd4c47d29553c9c0"
+        "sha256": "31beb817deb8e4b0945ca23d47a79fd4967984dde05ce914bd4c47d29553c9c0",
+        "version": "3.4.0"
       }
     }
   ]

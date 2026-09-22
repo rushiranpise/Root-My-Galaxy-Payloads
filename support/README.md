@@ -15,6 +15,13 @@ A `sha256` may also be declared on an artifact, which the client verifies in pla
 Pairs rebuilt by CI declare one, because the build computes the digest of what it just produced;
 entries written before that was the case carry only a size, which the client still checks.
 
+The `kernelsu` artifact may also declare `version`: the KernelSU release the daemon beside it was
+built from, such as `3.4.0`. A pair rebuilt by CI declares one, taken from the tag the run built at
+(`tools/update_feed.py --version`), and `tools/update_feed.py --backfill` writes it for entries whose
+`payloadId` already carries a version and which are not being rebuilt. The app uses it to offer the
+manager of the KernelSU a run will actually stage - the daemon and the manager have to be the same
+release - and falls back to the flavour's own release for an entry that declares none.
+
 An entry may additionally set `requiresFreshP0Session` to `true` when slide
 discovery and exploitation must run in the same payload process. The app then
 disables its per-boot P0 cache for that profile and gives the single combined
