@@ -413,8 +413,8 @@
       },
       "kernelsu": {
         "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-rsksu-pa3q-S938USQSCCZF9-kdp",
-        "size": 4352456,
-        "sha256": "9997a325b676cbdfb4530eb76c5f162247f95128a3a09b631f011eda5f47a62b",
+        "size": 4348936,
+        "sha256": "05d97d234536c26931ae7c7fc09403e891b8b01a574a1661d4b97e8e39822c5f",
         "version": "4.2.0-rc2"
       }
     }
