@@ -206,18 +206,36 @@ no single surface can hide.
   reports rather than guessed separately - the page served `(0, 0)` below 6.10
   while the access answer said `1`, which is the `policyload`/seqno split an
   app_zygote probe reads.
-- **`/proc/self/attr/current` is decided by the backup policy.** The replacement
-  used to ask the *live* policy whether the caller could `setcurrent` to itself,
-  validate the requested context against the *backup*, and then let the stock
-  handler decide again from the live policy - three answers from two policies. A
-  context only KernelSU's injected rules define (`ksu`, `ksu_file`) is refused by
-  the backup and resolved by the live one, and a caller that may not `setcurrent`
-  to itself is refused before the requested context is even looked at; both
-  return errnos a pristine kernel cannot produce. Both halves now come from the
-  backup: `-EINVAL` for a context it does not define, `-EACCES` for one it
-  defines but does not allow to `setcurrent`. The caller is entered in the
-  backup's sidtab by its context, because the backup holds only the initial sids
-  and a sid from the live table means something else there.
+- **`/proc/self/attr/current` keeps upstream's decision, and only the
+  *requested* context is answered from the backup.** The replacement asks the
+  live policy whether the caller may `setcurrent` to itself, then resolves the
+  context being written against the backup, so a context only the live policy
+  defines (`ksu`, `ksu_file`) is refused with `-EINVAL` before the stock handler
+  can apply the write. That resolution is the part this feature needs; the
+  permission stays where upstream put it.
+
+  A build that decided the permission *from the backup* as well ("both halves
+  from one policy", shipped 2026-09-23) had to be reverted, and the device is the
+  reason. With `selinux_hide` enabled, every app stopped starting: 114 Zygote
+  children aborted in `selinux_android_setcontext` in the ten minutes after the
+  feature came on, the first abort 29 s after it, and each abort is the write of
+  an ordinary app context (`u:r:priv_app:s0` and friends) being refused. The
+  measurement that points at the permission rather than the resolution is on the
+  same device: `u:r:priv_app:s0` and `u:r:zygote:s0` resolve through the backup
+  (their writes to `/sys/fs/selinux/context` are accepted, `u:r:ksu:s0` and
+  `u:object_r:ksu_file:s0` are refused), which rules the resolution step out. Of
+  the paths the helper has left, the one this build added is
+  `!(avd.allowed & PROCESS__SETCURRENT)` computed for (caller, requested context)
+  - a permission a stock kernel asks of the caller against itself, and the build
+  that ran before this commit asked it that way with apps starting. Not measured:
+  which of the helper's `-EACCES` paths returned, since the abort record carries
+  the failing function and not the errno.
+
+  The generator keeps the helper and the switch that re-enables it
+  (`PROC_DECISION_FROM_BACKUP`, off), and `syn/emit4.py` compiles the shipped
+  replacement function itself for all five flavours across the four kernel-version
+  configurations - the check that was missing, since the gate and the helper were
+  each compiled alone while the function they edit was not.
 
 - **A context the pristine policy does not define is answered `-EINVAL` for
   every caller.** Every rule KernelSU injects names one of its own types on one

@@ -504,7 +504,7 @@ index 78d9e6a..004bc9a 100644
  
  #if NEED_OWN_STACKPROTECTOR
 diff --git a/kernel/feature/selinux_hide.c b/kernel/feature/selinux_hide.c
-index a57ed013..5ae0eb2b 100644
+index a57ed013..a0e1177a 100644
 --- a/kernel/feature/selinux_hide.c
 +++ b/kernel/feature/selinux_hide.c
 @@ -12,6 +12,9 @@
@@ -670,106 +670,8 @@ index a57ed013..5ae0eb2b 100644
  #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0) &&                                                                   \
      (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0) || defined(KSU_COMPAT_HAS_LIST_OF_LSM_HOOKS))
  static setprocattr_fn ksu_orig_setprocattr;
-@@ -298,6 +415,94 @@
- extern setprocattr_fn ksu_orig_setprocattr;
- #endif
- 
-+/*
-+ * Whether a write to /proc/self/attr/current may go through, answered by the
-+ * backup policy: -EINVAL for a context that policy does not define, -EACCES for
-+ * one it defines but does not allow setcurrent to, and 0 when it allows the
-+ * write and the stock handler may apply it. Both halves of the decision have to
-+ * come from one policy - see the call site.
-+ */
-+static int sel_hide_backup_setcurrent(const char *scontext, size_t size)
-+{
-+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
-+    struct av_decision avd;
-+    u32 sid, mysid;
-+    int error;
-+    char *mycon = NULL;
-+    u32 mycon_len = 0;
-+    struct selinux_policy *live;
-+
-+    error = security_context_to_sid_with_policy(backup_sepolicy, scontext, size, &sid, SECSID_NULL, GFP_KERNEL);
-+    if (error)
-+        return error;
-+
-+    /*
-+     * The caller's sid indexes the live policy's sidtab and the backup has its
-+     * own - it starts from the initial sids and grows only with what has been
-+     * resolved through it - so the caller is entered there by its context rather
-+     * than by a number that means something else in the other table.
-+     */
-+    rcu_read_lock();
-+    live = rcu_dereference(selinux_state.policy);
-+    error = live ? security_sid_to_context_with_policy(live, current_sid(), &mycon, &mycon_len) : -EINVAL;
-+    rcu_read_unlock();
-+    if (error) {
-+        pr_debug("selinux_hide: setprocattr: no context for sid %u (%d)\n", current_sid(), error);
-+        return -EACCES;
-+    }
-+
-+    error = security_context_to_sid_with_policy(backup_sepolicy, mycon, mycon_len, &mysid, SECSID_NULL, GFP_KERNEL);
-+    kfree(mycon);
-+    if (error) {
-+        pr_debug("selinux_hide: setprocattr: caller context unknown to the backup (%d)\n", error);
-+        return -EACCES;
-+    }
-+
-+    security_compute_av_user_with_policy(backup_sepolicy, mysid, sid, SECCLASS_PROCESS, &avd);
-+    if (!(avd.allowed & PROCESS__SETCURRENT)) {
-+        return -EACCES;
-+    }
-+    return 0;
-+#elif defined(KSU_COMPAT_USE_SELINUX_STATE)
-+    struct av_decision avd;
-+    u32 sid, mysid;
-+    int error;
-+    char *mycon = NULL;
-+    u32 mycon_len = 0;
-+
-+    error = security_context_to_sid(&fake_state, scontext, size, &sid, GFP_KERNEL);
-+    if (error)
-+        return error;
-+
-+    /* The caller's sid belongs to the live policy, so the caller is entered in
-+     * the backup's sidtab by its context. */
-+    error = security_sid_to_context(&selinux_state, current_sid(), &mycon, &mycon_len);
-+    if (error) {
-+        pr_debug("selinux_hide: setprocattr: no context for sid %u (%d)\n", current_sid(), error);
-+        return -EACCES;
-+    }
-+
-+    error = security_context_to_sid(&fake_state, mycon, mycon_len, &mysid, GFP_KERNEL);
-+    kfree(mycon);
-+    if (error) {
-+        pr_debug("selinux_hide: setprocattr: caller context unknown to the backup (%d)\n", error);
-+        return -EACCES;
-+    }
-+
-+    security_compute_av_user(&fake_state, mysid, sid, SECCLASS_PROCESS, &avd);
-+    if (!(avd.allowed & PROCESS__SETCURRENT)) {
-+        return -EACCES;
-+    }
-+    return 0;
-+#else
-+    /* This kernel has the compat helpers only for the live policy, so there is
-+     * no backup to ask; the decision stays with the stock handler. */
-+    (void)scontext;
-+    (void)size;
-+    return 0;
-+#endif
-+
-+}
- #if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 11, 0) || defined(KSU_COMPAT_SETPROCATTR_USE_NEW_PROTOTYPE)
- int __nocfi ksu_handle_selinux_setprocattr(const char *name, void *value, size_t size)
- #else
-@@ -305,44 +510,61 @@
- #endif
- {
-     int error;
--    u32 mysid, sid;
+@@ -308,6 +425,22 @@
+     u32 mysid, sid;
      char *str = value;
      if (likely(ksu_get_uid_t(current_uid()) < 10000)) {
 +        /*
@@ -791,68 +693,7 @@ index a57ed013..5ae0eb2b 100644
          goto call_orig;
      }
  
-     if (strcmp(name, "current")) {
-         goto call_orig;
-     }
--    mysid = current_sid();
--
--#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
--    error = avc_has_perm(mysid, mysid, SECCLASS_PROCESS, PROCESS__SETCURRENT, NULL);
--#elif defined(KSU_COMPAT_USE_SELINUX_STATE)
--    error = avc_has_perm(&selinux_state, mysid, mysid, SECCLASS_PROCESS, PROCESS__SETCURRENT, NULL);
--#else
--    error = avc_has_perm(mysid, mysid, SECCLASS_PROCESS, PROCESS__SETCURRENT, NULL);
--#endif
--    if (error) {
--        return error;
--    }
--
-+    /*
-+     * Both halves of this write are decided by the backup policy.
-+     *
-+     * This used to ask the live policy whether the caller may setcurrent to
-+     * itself, then validate the requested context against the backup, and then
-+     * hand the write to the stock handler, which decides again from the live
-+     * policy - three answers from two policies, so the answer is one neither
-+     * policy would give. A context only KernelSU's injected rules define is
-+     * refused by the backup and then resolved by the live one, and a caller that
-+     * may not setcurrent to itself is refused before the requested context is
-+     * even looked at; both produce errnos a pristine kernel cannot produce,
-+     * which is exactly what an attr/current oracle reads. A pristine phone
-+     * answers -EINVAL for a context its policy does not define and -EACCES for
-+     * one it defines but does not allow to setcurrent, and both now come from
-+     * the backup policy - the same one the status page and the access answer are
-+     * forged from.
-+     */
-     if (size && str[0] && str[0] != '\n') {
-         if (str[size - 1] == '\n') {
-             str[size - 1] = 0;
-             size--;
-         }
--#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
--        error = security_context_to_sid_with_policy(backup_sepolicy, str, size, &sid, SECSID_NULL, GFP_KERNEL);
--#elif defined(KSU_COMPAT_USE_SELINUX_STATE)
--        error = security_context_to_sid(&fake_state, str, size, &sid, GFP_KERNEL);
--#else
--        error = ksu_security_context_to_sid(str, size, &sid, GFP_KERNEL);
--#endif
--        if (error) {
--            return error;
--        }
--    }
-+    } else {
-+        goto call_orig;
-+    }
-+
-+    error = sel_hide_backup_setcurrent(str, size);
-+    if (error) {
-+        return error;
-+    }
-+
- 
- call_orig:
- #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
-@@ -382,6 +604,216 @@
+@@ -382,6 +515,216 @@
      return ret;
  }
  
@@ -1069,7 +910,7 @@ index a57ed013..5ae0eb2b 100644
  static void hook_selinux_status_open()
  {
      if (orig_sel_open_handle_status)
-@@ -399,11 +831,15 @@
+@@ -399,11 +742,15 @@
          }
          sel_open_handle_status_slot = &ops->open;
      }
@@ -1088,7 +929,7 @@ index a57ed013..5ae0eb2b 100644
          sel_open_handle_status_slot = NULL;
          orig_sel_open_handle_status = NULL;
      }
-@@ -414,7 +850,11 @@
+@@ -414,7 +761,11 @@
  static void ksu_selinux_hide_unhook()
  {
      int ret;
@@ -1101,7 +942,7 @@ index a57ed013..5ae0eb2b 100644
          ret =
              ksu_patch_text(context_write, &orig_context_write, sizeof(orig_context_write), KSU_PATCH_TEXT_FLUSH_DCACHE);
          orig_context_write = NULL;
-@@ -422,15 +862,29 @@
+@@ -422,15 +773,29 @@
              pr_err("selinux_hide: exit: patch_text context_write err: %d\n", ret);
          }
      }
@@ -1133,7 +974,7 @@ index a57ed013..5ae0eb2b 100644
  #elif LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0) || defined(KSU_COMPAT_HAS_LIST_OF_LSM_HOOKS)
      if (ksu_orig_setprocattr) {
          ret = ksu_patch_text((void *)selinux_setprocattr_hook_ptr, &ksu_orig_setprocattr, sizeof(ksu_orig_setprocattr),
-@@ -558,28 +1012,27 @@
+@@ -558,28 +923,27 @@
  
      context_write = &selinux_write_op[SEL_CONTEXT];
      pr_info("selinux_hide: context_write: 0x%lx [%pSb]\n", (unsigned long)*context_write, *context_write);
@@ -1169,7 +1010,7 @@ index a57ed013..5ae0eb2b 100644
          goto unhook;
      }
  #elif LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0) || defined(KSU_COMPAT_HAS_LIST_OF_LSM_HOOKS)
-@@ -663,7 +1116,6 @@
+@@ -663,7 +1027,6 @@
      int ret = 0;
      pr_info("selinux_hide: set to %d\n", enable);
      mutex_lock(&selinux_hide_mutex);
@@ -1177,7 +1018,7 @@ index a57ed013..5ae0eb2b 100644
      if (enable) {
          if (!ksu_selinux_hide_running) {
              ret = ksu_selinux_hide_enable();
-@@ -677,6 +1129,10 @@
+@@ -677,6 +1040,10 @@
              ksu_selinux_hide_running = false;
          }
      }
@@ -1188,7 +1029,7 @@ index a57ed013..5ae0eb2b 100644
      mutex_unlock(&selinux_hide_mutex);
      return ret;
  }
-@@ -841,17 +1297,16 @@
+@@ -841,17 +1208,16 @@
      struct selinux_kernel_status *new_status = page_address(new_page);
      memcpy(new_status, status, sizeof(*status));
      if (ksu_late_loaded) {
@@ -1216,22 +1057,6 @@ index a57ed013..5ae0eb2b 100644
          if (!new_status->enforcing) {
              new_status->enforcing = 1;
          }
-@@ -1783,13 +2238,8 @@
-     avd->auditallow = 0;
-     avd->auditdeny = 0xffffffff;
- 
--    // hardcode 1 to avoid detect for "avdSeqNo"
--    // Normal android only set selinux policy once,
--    // So there can be simple hardcode to 1
--    // For other kernel version
--    // kernel with selinux_policy backup real seqno before KernelSU apply rules
--    // kernel with selinux_state hardcode to 1 when userspace call selinux hide enable
--    avd->seqno = 1;
-+    // The same policy sequence the page and the access answer report.
-+    avd->seqno = sel_hide_policy_seqno();
-     avd->flags = 0;
- }
- 
 diff --git a/kernel/hook/arm64/patch_memory.c b/kernel/hook/arm64/patch_memory.c
 index e9557e2..7cc549b 100644
 --- a/kernel/hook/arm64/patch_memory.c

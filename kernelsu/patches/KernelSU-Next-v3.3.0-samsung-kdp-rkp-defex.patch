@@ -524,20 +524,19 @@ index c158df8..6e2ac43 100644
  
  #if NEED_OWN_STACKPROTECTOR
 diff --git a/kernel/feature/selinux_hide.c b/kernel/feature/selinux_hide.c
-index 5bb59bfe..43ed025b 100644
+index 5bb59bfe..682e68be 100644
 --- a/kernel/feature/selinux_hide.c
 +++ b/kernel/feature/selinux_hide.c
-@@ -14,6 +14,9 @@
+@@ -14,6 +14,8 @@
  #include <net/genetlink.h>
  #include <linux/moduleparam.h>
  #include <linux/mutex.h>
 +#include <linux/kprobes.h>
 +#include <linux/xarray.h>
-+#include <linux/rcupdate.h>
  // security/selinux/include/security.h
  #include <security.h>
  #include <ss/context.h>
-@@ -77,6 +80,93 @@
+@@ -77,6 +79,93 @@
  static struct selinux_state fake_state;
  #endif
  
@@ -631,7 +630,7 @@ index 5bb59bfe..43ed025b 100644
  static write_op_fn *context_write, *access_write;
  static write_op_fn orig_context_write, orig_access_write;
  
-@@ -84,6 +174,16 @@
+@@ -84,6 +173,16 @@
  {
      // apply to all app uids
      if (likely(current_uid().val < 10000)) {
@@ -648,7 +647,7 @@ index 5bb59bfe..43ed025b 100644
          return orig_context_write(file, buf, size);
      }
      char *canon = NULL;
-@@ -135,6 +235,15 @@
+@@ -135,6 +234,15 @@
  {
      // apply to all app uids
      if (likely(current_uid().val < 10000)) {
@@ -664,7 +663,7 @@ index 5bb59bfe..43ed025b 100644
          return orig_access_write(file, buf, size);
      }
      char *scon = NULL, *tcon = NULL;
-@@ -188,6 +297,8 @@
+@@ -188,6 +296,8 @@
      security_compute_av_user(&fake_state, ssid, tsid, tclass, &avd);
  #endif
  
@@ -673,99 +672,16 @@ index 5bb59bfe..43ed025b 100644
      length = scnprintf(buf, SIMPLE_TRANSACTION_LIMIT, "%x %x %x %x %u %x", avd.allowed, 0xffffffff, avd.auditallow,
                         avd.auditdeny, avd.seqno, avd.flags);
  out:
-@@ -198,45 +309,149 @@
+@@ -198,6 +308,7 @@
  
  static int my_setprocattr(const char *name, void *value, size_t size);
  struct ksu_lsm_hook selinux_setprocattr_hook = KSU_LSM_HOOK_INIT(setprocattr, "selinux_setprocattr", my_setprocattr, 0);
 +static void *orig_selinux_setprocattr;
  
  typedef int (*setprocattr_fn)(const char *name, void *value, size_t size);
-+/*
-+ * Whether a write to /proc/self/attr/current may go through, answered by the
-+ * backup policy: -EINVAL for a context that policy does not define, -EACCES for
-+ * one it defines but does not allow setcurrent to, and 0 when it allows the
-+ * write and the stock handler may apply it. Both halves of the decision have to
-+ * come from one policy - see the call site.
-+ */
-+static int sel_hide_backup_setcurrent(const char *scontext, size_t size)
-+{
-+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
-+    struct av_decision avd;
-+    u32 sid, mysid;
-+    int error;
-+    char *mycon = NULL;
-+    u32 mycon_len = 0;
-+    struct selinux_policy *live;
-+
-+    error = security_context_to_sid_with_policy(backup_sepolicy, scontext, size, &sid, SECSID_NULL, GFP_KERNEL);
-+    if (error)
-+        return error;
-+
-+    /*
-+     * The caller's sid indexes the live policy's sidtab and the backup has its
-+     * own - it starts from the initial sids and grows only with what has been
-+     * resolved through it - so the caller is entered there by its context rather
-+     * than by a number that means something else in the other table.
-+     */
-+    rcu_read_lock();
-+    live = rcu_dereference(selinux_state.policy);
-+    error = live ? security_sid_to_context_with_policy(live, current_sid(), &mycon, &mycon_len) : -EINVAL;
-+    rcu_read_unlock();
-+    if (error) {
-+        pr_debug("selinux_hide: setprocattr: no context for sid %u (%d)\n", current_sid(), error);
-+        return -EACCES;
-+    }
-+
-+    error = security_context_to_sid_with_policy(backup_sepolicy, mycon, mycon_len, &mysid, SECSID_NULL, GFP_KERNEL);
-+    kfree(mycon);
-+    if (error) {
-+        pr_debug("selinux_hide: setprocattr: caller context unknown to the backup (%d)\n", error);
-+        return -EACCES;
-+    }
-+
-+    security_compute_av_user_with_policy(backup_sepolicy, mysid, sid, SECCLASS_PROCESS, &avd);
-+    if (!(avd.allowed & PROCESS__SETCURRENT)) {
-+        return -EACCES;
-+    }
-+    return 0;
-+#else
-+    struct av_decision avd;
-+    u32 sid, mysid;
-+    int error;
-+    char *mycon = NULL;
-+    u32 mycon_len = 0;
-+
-+    error = security_context_to_sid(&fake_state, scontext, size, &sid, GFP_KERNEL);
-+    if (error)
-+        return error;
-+
-+    /* The caller's sid belongs to the live policy, so the caller is entered in
-+     * the backup's sidtab by its context. */
-+    error = security_sid_to_context(&selinux_state, current_sid(), &mycon, &mycon_len);
-+    if (error) {
-+        pr_debug("selinux_hide: setprocattr: no context for sid %u (%d)\n", current_sid(), error);
-+        return -EACCES;
-+    }
-+
-+    error = security_context_to_sid(&fake_state, mycon, mycon_len, &mysid, GFP_KERNEL);
-+    kfree(mycon);
-+    if (error) {
-+        pr_debug("selinux_hide: setprocattr: caller context unknown to the backup (%d)\n", error);
-+        return -EACCES;
-+    }
-+
-+    security_compute_av_user(&fake_state, mysid, sid, SECCLASS_PROCESS, &avd);
-+    if (!(avd.allowed & PROCESS__SETCURRENT)) {
-+        return -EACCES;
-+    }
-+    return 0;
-+#endif
-+
-+}
  static int __nocfi my_setprocattr(const char *name, void *value, size_t size)
- {
-     int error;
--    u32 mysid, sid;
+@@ -206,6 +317,22 @@
+     u32 mysid, sid;
      char *str = value;
      if (likely(current_uid().val < 10000)) {
 +        /*
@@ -787,64 +703,7 @@ index 5bb59bfe..43ed025b 100644
          goto call_orig;
      }
  
-     if (strcmp(name, "current")) {
-         goto call_orig;
-     }
--    mysid = current_sid();
--
--#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
--    error = avc_has_perm(mysid, mysid, SECCLASS_PROCESS, PROCESS__SETCURRENT, NULL);
--#else
--    error = avc_has_perm(&selinux_state, mysid, mysid, SECCLASS_PROCESS, PROCESS__SETCURRENT, NULL);
--#endif
--    if (error) {
--        return error;
--    }
--
-+    /*
-+     * Both halves of this write are decided by the backup policy.
-+     *
-+     * This used to ask the live policy whether the caller may setcurrent to
-+     * itself, then validate the requested context against the backup, and then
-+     * hand the write to the stock handler, which decides again from the live
-+     * policy - three answers from two policies, so the answer is one neither
-+     * policy would give. A context only KernelSU's injected rules define is
-+     * refused by the backup and then resolved by the live one, and a caller that
-+     * may not setcurrent to itself is refused before the requested context is
-+     * even looked at; both produce errnos a pristine kernel cannot produce,
-+     * which is exactly what an attr/current oracle reads. A pristine phone
-+     * answers -EINVAL for a context its policy does not define and -EACCES for
-+     * one it defines but does not allow to setcurrent, and both now come from
-+     * the backup policy - the same one the status page and the access answer are
-+     * forged from.
-+     */
-     if (size && str[0] && str[0] != '\n') {
-         if (str[size - 1] == '\n') {
-             str[size - 1] = 0;
-             size--;
-         }
--#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
--        error = security_context_to_sid_with_policy(backup_sepolicy, str, size, &sid, SECSID_NULL, GFP_KERNEL);
--#else
--        error = security_context_to_sid(&fake_state, str, size, &sid, GFP_KERNEL);
--#endif
--        if (error) {
--            return error;
--        }
--    }
-+    } else {
-+        goto call_orig;
-+    }
-+
-+    error = sel_hide_backup_setcurrent(str, size);
-+    if (error) {
-+        return error;
-+    }
-+
- 
- call_orig:
-     return ((setprocattr_fn)selinux_setprocattr_hook.original)(name, value, size);
-@@ -269,12 +484,17 @@
+@@ -269,12 +396,17 @@
  
      struct selinux_kernel_status *new_status = page_address(new_page);
      memcpy(new_status, status, sizeof(*status));
@@ -867,7 +726,7 @@ index 5bb59bfe..43ed025b 100644
      }
  
      fake_status = new_page;
-@@ -307,6 +527,213 @@
+@@ -307,6 +439,213 @@
      return ret;
  }
  
@@ -1081,7 +940,7 @@ index 5bb59bfe..43ed025b 100644
  static void hook_selinux_status_open();
  static void ksu_selinux_hide_unhook();
  static int ksu_selinux_hide_enable()
-@@ -340,27 +767,26 @@
+@@ -340,27 +679,26 @@
  
      context_write = &selinux_write_op[SEL_CONTEXT];
      pr_info("selinux_hide: context_write: 0x%lx [%pSb]\n", (unsigned long)*context_write, *context_write);
@@ -1116,7 +975,7 @@ index 5bb59bfe..43ed025b 100644
          goto unhook;
      }
  
-@@ -374,7 +800,11 @@
+@@ -374,7 +712,11 @@
  static void ksu_selinux_hide_unhook()
  {
      int ret;
@@ -1129,7 +988,7 @@ index 5bb59bfe..43ed025b 100644
          ret =
              ksu_patch_text(context_write, &orig_context_write, sizeof(orig_context_write), KSU_PATCH_TEXT_FLUSH_DCACHE);
          orig_context_write = NULL;
-@@ -382,14 +812,22 @@
+@@ -382,14 +724,22 @@
              pr_err("selinux_hide: exit: patch_text context_write err: %d\n", ret);
          }
      }
@@ -1154,7 +1013,7 @@ index 5bb59bfe..43ed025b 100644
          ret = ksu_patch_text(sel_open_handle_status_slot, &orig_sel_open_handle_status,
                               sizeof(orig_sel_open_handle_status), KSU_PATCH_TEXT_FLUSH_DCACHE);
          orig_sel_open_handle_status = NULL;
-@@ -397,7 +835,14 @@
+@@ -397,7 +747,14 @@
              pr_err("selinux_hide: exit: patch_text sel_open_handle_status err: %d\n", ret);
          }
      }
@@ -1170,7 +1029,7 @@ index 5bb59bfe..43ed025b 100644
  }
  
  static void ksu_selinux_hide_disable()
-@@ -418,7 +863,6 @@
+@@ -418,7 +775,6 @@
      int ret = 0;
      pr_info("selinux_hide: set to %d\n", enable);
      mutex_lock(&selinux_hide_mutex);
@@ -1178,7 +1037,7 @@ index 5bb59bfe..43ed025b 100644
      if (enable) {
          if (!ksu_selinux_hide_running) {
              ret = ksu_selinux_hide_enable();
-@@ -432,6 +876,10 @@
+@@ -432,6 +788,10 @@
              ksu_selinux_hide_running = false;
          }
      }
@@ -1189,7 +1048,7 @@ index 5bb59bfe..43ed025b 100644
      mutex_unlock(&selinux_hide_mutex);
      return ret;
  }
-@@ -474,11 +922,15 @@
+@@ -474,11 +834,15 @@
          }
          sel_open_handle_status_slot = &ops->open;
      }
