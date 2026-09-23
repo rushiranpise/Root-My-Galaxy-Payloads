@@ -515,7 +515,7 @@ index f60c2fd0..b6f54c1a 100644
  
  #if NEED_OWN_STACKPROTECTOR
 diff --git a/kernel/feature/selinux_hide.c b/kernel/feature/selinux_hide.c
-index fbb6c44f..e92e4d5f 100644
+index fbb6c44f..cff087ba 100644
 --- a/kernel/feature/selinux_hide.c
 +++ b/kernel/feature/selinux_hide.c
 @@ -14,6 +14,8 @@
@@ -527,147 +527,7 @@ index fbb6c44f..e92e4d5f 100644
  // security/selinux/include/security.h
  #include <security.h>
  #include <ss/context.h>
-@@ -77,6 +79,93 @@
- static struct selinux_state fake_state;
- #endif
- 
-+/*
-+ * The one policy sequence every forged surface reports.
-+ *
-+ * On a stock kernel the status page and the access answer carry the same number,
-+ * and it is the same field twice: security_load_policy() hands the policy's
-+ * latest_granting to avc_ss_reset(), which writes it into status->policyload, and
-+ * security_compute_av_user() copies that field into av_decision.seqno, which is
-+ * what a write to /sys/fs/selinux/access returns. A carrier that reads the page
-+ * and then asks the access oracle therefore gets one number back twice, so a page
-+ * claiming 0 loads while the access answer says 1 is a split no per-surface
-+ * correctness can hide - and it is what the app_zygote seqno probe reports.
-+ *
-+ * Both surfaces read the number from here, and it is the backup policy's own
-+ * latest_granting: the policy the access answer is already computed against, and
-+ * the value a plain boot's single load_policy leaves behind.
-+ */
-+static u32 sel_hide_policy_seqno(void)
-+{
-+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
-+    return backup_sepolicy ? backup_sepolicy->latest_granting : 0;
-+#else
-+    /* No policy handle to ask on this kernel: report the value the single
-+     * boot-time load leaves, which is what the access answer reports here too. */
-+    return 1;
-+#endif
-+}
-+/*
-+ * Whether a context is one the pristine policy does not define.
-+ *
-+ * Every rule KernelSU injects names one of its own types on one side - ksu,
-+ * ksu_file - and backup_sepolicy is the duplicate taken before those types and
-+ * rules were created, so both such a rule and the contexts it names describe
-+ * something that policy has never heard of. A stock kernel answers -EINVAL for
-+ * a query about a context it does not define, and saying so is what keeps the
-+ * live policy's copy of KernelSU's own rules from being read out of an oracle.
-+ *
-+ * Returns 0 when the pristine policy knows the context, the resolve error when
-+ * it does not.
-+ */
-+static int sel_hide_pristine_rejects(const char *scontext, size_t size)
-+{
-+    u32 sid;
-+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 6, 0)
-+    return security_context_to_sid_with_policy(backup_sepolicy, scontext, size, &sid, SECSID_NULL, GFP_KERNEL);
-+#else
-+    return security_context_to_sid(&fake_state, scontext, size, &sid, GFP_KERNEL);
-+#endif
-+}
-+/*
-+ * Whether an access query is about a context the pristine policy does not
-+ * define.
-+ *
-+ * The query is "scontext tcontext tclass" and both contexts have to exist in
-+ * the policy we are pretending is loaded; answering it from the live policy
-+ * instead is how "untrusted_app -> ksu_file:file read" comes back allowed.
-+ *
-+ * Returns 0 when both contexts are known, and the error the whole query should
-+ * be answered with when either is not (or when it is not a query at all).
-+ */
-+static int sel_hide_pristine_rejects_query(char *buf, size_t size)
-+{
-+    char *scon = NULL, *tcon = NULL;
-+    u16 tclass;
-+    int error;
-+
-+    scon = kzalloc(size + 1, GFP_KERNEL);
-+    if (!scon)
-+        return -ENOMEM;
-+    tcon = kzalloc(size + 1, GFP_KERNEL);
-+    if (!tcon) {
-+        kfree(scon);
-+        return -ENOMEM;
-+    }
-+
-+    error = -EINVAL;
-+    if (sscanf(buf, "%s %s %hu", scon, tcon, &tclass) != 3)
-+        goto out;
-+
-+    error = sel_hide_pristine_rejects(scon, strlen(scon));
-+    if (error)
-+        goto out;
-+    error = sel_hide_pristine_rejects(tcon, strlen(tcon));
-+out:
-+    kfree(tcon);
-+    kfree(scon);
-+    return error;
-+}
- static write_op_fn *context_write, *access_write;
- static write_op_fn orig_context_write, orig_access_write;
- 
-@@ -84,6 +173,16 @@
- {
-     // apply to all app uids
-     if (likely(current_uid().val < 10000)) {
-+        /*
-+         * A context the pristine policy does not define is one KernelSU's own
-+         * rules created, and this caller's answer otherwise comes from the live
-+         * policy, which knows it. A stock kernel answers -EINVAL here, so that
-+         * is what every caller gets before the stock handler is allowed to
-+         * speak.
-+         */
-+        ssize_t rejected = sel_hide_pristine_rejects(buf, size);
-+        if (rejected)
-+            return rejected;
-         return orig_context_write(file, buf, size);
-     }
-     char *canon = NULL;
-@@ -135,6 +234,15 @@
- {
-     // apply to all app uids
-     if (likely(current_uid().val < 10000)) {
-+        /*
-+         * A query naming a context the pristine policy does not define is a
-+         * query about KernelSU's own rules, and answering it from the live
-+         * policy is how "untrusted_app -> ksu_file:file read" comes back
-+         * allowed. A stock kernel answers -EINVAL here, for every caller.
-+         */
-+        ssize_t rejected = sel_hide_pristine_rejects_query(buf, size);
-+        if (rejected)
-+            return rejected;
-         return orig_access_write(file, buf, size);
-     }
-     char *scon = NULL, *tcon = NULL;
-@@ -188,8 +296,10 @@
-     security_compute_av_user(&fake_state, ssid, tsid, tclass, &avd);
- #endif
- 
--    // stock reads 1; a loader load_policy may have bumped the backup before we load
--    avd.seqno = 1;
-+    // One policy sequence across both forged surfaces: on a stock kernel this
-+    // seqno and the status page's policyload are the same field of the same
-+    // policy, so both are read from sel_hide_policy_seqno().
-+    avd.seqno = sel_hide_policy_seqno();
-     length = scnprintf(buf, SIMPLE_TRANSACTION_LIMIT, "%x %x %x %x %u %x", avd.allowed, 0xffffffff, avd.auditallow,
-                        avd.auditdeny, avd.seqno, avd.flags);
- out:
-@@ -200,6 +310,7 @@
+@@ -200,6 +202,7 @@
  
  static int my_setprocattr(const char *name, void *value, size_t size);
  struct ksu_lsm_hook selinux_setprocattr_hook = KSU_LSM_HOOK_INIT(setprocattr, "selinux_setprocattr", my_setprocattr, 0);
@@ -675,58 +535,7 @@ index fbb6c44f..e92e4d5f 100644
  
  typedef int (*setprocattr_fn)(const char *name, void *value, size_t size);
  static int __nocfi my_setprocattr(const char *name, void *value, size_t size)
-@@ -208,6 +319,22 @@
-     u32 mysid, sid;
-     char *str = value;
-     if (likely(current_uid().val < 10000)) {
-+        /*
-+         * A context the pristine policy does not define is one KernelSU's own
-+         * rules created, and the stock handler would resolve it against the
-+         * live policy, which knows it. A stock kernel answers -EINVAL here, for
-+         * every caller.
-+         */
-+        if (size && str[0] && str[0] != '\n') {
-+            if (str[size - 1] == '\n') {
-+                str[size - 1] = 0;
-+                size--;
-+            }
-+            error = sel_hide_pristine_rejects(str, size);
-+            if (error) {
-+                return error;
-+            }
-+        }
-         goto call_orig;
-     }
- 
-@@ -272,17 +399,16 @@
-     struct selinux_kernel_status *new_status = page_address(new_page);
-     memcpy(new_status, status, sizeof(*status));
-     if (ksu_late_loaded) {
--        // In late_load mode the loader may have reloaded sepolicy before us,
--        // so the captured page is not stock. Serve what a stock boot ends
--        // with instead: creation sentinel below 6.10, one load plus one
--        // setenforce above.
--#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
--        new_status->sequence = 4;
--        new_status->policyload = 1;
--#else
--        new_status->sequence = 0;
--        new_status->policyload = 0;
--#endif
-+        // In late_load mode the loader may have reloaded sepolicy before us, so
-+        // the captured page is not stock: serve the pair a plain boot ends with
-+        // instead. Both numbers come from one place because on a stock kernel
-+        // they are one number - status->policyload is written from the policy's
-+        // latest_granting and the access answer returns that same field as
-+        // av_decision.seqno - so a page claiming 0 loads while the access oracle
-+        // answers 1 is the split the app_zygote probe reports. A load adds four
-+        // to sequence, which keeps the pair one a kernel could have produced.
-+        new_status->policyload = sel_hide_policy_seqno();
-+        new_status->sequence = new_status->policyload * 4;
-         if (!new_status->enforcing) {
-             new_status->enforcing = 1;
-         }
-@@ -318,6 +444,213 @@
+@@ -318,6 +321,213 @@
      return ret;
  }
  
@@ -940,7 +749,7 @@ index fbb6c44f..e92e4d5f 100644
  static void hook_selinux_status_open();
  static void ksu_selinux_hide_unhook();
  static int ksu_selinux_hide_enable()
-@@ -351,27 +684,26 @@
+@@ -351,27 +561,26 @@
  
      context_write = &selinux_write_op[SEL_CONTEXT];
      pr_info("selinux_hide: context_write: 0x%lx [%pSb]\n", (unsigned long)*context_write, *context_write);
@@ -975,7 +784,7 @@ index fbb6c44f..e92e4d5f 100644
          goto unhook;
      }
  
-@@ -385,7 +717,11 @@
+@@ -385,7 +594,11 @@
  static void ksu_selinux_hide_unhook()
  {
      int ret;
@@ -988,7 +797,7 @@ index fbb6c44f..e92e4d5f 100644
          ret =
              ksu_patch_text(context_write, &orig_context_write, sizeof(orig_context_write), KSU_PATCH_TEXT_FLUSH_DCACHE);
          orig_context_write = NULL;
-@@ -393,14 +729,22 @@
+@@ -393,14 +606,22 @@
              pr_err("selinux_hide: exit: patch_text context_write err: %d\n", ret);
          }
      }
@@ -1013,7 +822,7 @@ index fbb6c44f..e92e4d5f 100644
          ret = ksu_patch_text(sel_open_handle_status_slot, &orig_sel_open_handle_status,
                               sizeof(orig_sel_open_handle_status), KSU_PATCH_TEXT_FLUSH_DCACHE);
          orig_sel_open_handle_status = NULL;
-@@ -408,7 +752,14 @@
+@@ -408,7 +629,14 @@
              pr_err("selinux_hide: exit: patch_text sel_open_handle_status err: %d\n", ret);
          }
      }
@@ -1029,7 +838,7 @@ index fbb6c44f..e92e4d5f 100644
  }
  
  static void ksu_selinux_hide_disable()
-@@ -429,7 +780,6 @@
+@@ -429,7 +657,6 @@
      int ret = 0;
      pr_info("selinux_hide: set to %d\n", enable);
      mutex_lock(&selinux_hide_mutex);
@@ -1037,7 +846,7 @@ index fbb6c44f..e92e4d5f 100644
      if (enable) {
          if (!ksu_selinux_hide_running) {
              ret = ksu_selinux_hide_enable();
-@@ -443,6 +793,10 @@
+@@ -443,6 +670,10 @@
              ksu_selinux_hide_running = false;
          }
      }
@@ -1048,7 +857,7 @@ index fbb6c44f..e92e4d5f 100644
      mutex_unlock(&selinux_hide_mutex);
      return ret;
  }
-@@ -485,11 +839,15 @@
+@@ -485,11 +716,15 @@
          }
          sel_open_handle_status_slot = &ops->open;
      }
