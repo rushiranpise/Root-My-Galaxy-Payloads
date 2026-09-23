@@ -392,8 +392,8 @@
       },
       "kernelsu": {
         "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-next-pa3q-S938USQSCCZF9-kdp",
-        "size": 4228176,
-        "sha256": "f9a6942ce703faa608e63e893b6d71f381829073121ae0737fd4a0f28e50992e",
+        "size": 4230864,
+        "sha256": "3ac8589966d889c6edc59710bba6377c24f7afb5ffc2af875344e7b90c5175a1",
         "version": "3.4.0"
       }
     },
