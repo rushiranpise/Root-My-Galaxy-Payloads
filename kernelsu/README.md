@@ -190,6 +190,49 @@ get selinux_hide` now reports 0 after a refused enable: the flag is set from the
 enable path's result instead of before it, so it no longer reads as enabled
 while every probe is still answered by the stock kernel.
 
+### What the hidden surfaces say
+
+The redirection is only as good as its internal agreement: a carrier reads one
+surface and then asks another, and a contradiction between them is a signature
+no single surface can hide.
+
+- **One policy sequence.** The status page's `policyload` and the `seqno` an
+  access query returns are the same field of the same policy on a stock kernel:
+  `security_load_policy()` hands the policy's `latest_granting` to
+  `avc_ss_reset()`, which writes it to the status page, and
+  `security_compute_av_user()` copies that field into `av_decision.seqno`. Both
+  surfaces now read it from `sel_hide_policy_seqno()`, so the fake page's
+  `(sequence, policyload)` pair is derived from the value the access answer
+  reports rather than guessed separately - the page served `(0, 0)` below 6.10
+  while the access answer said `1`, which is the `policyload`/seqno split an
+  app_zygote probe reads.
+- **`/proc/self/attr/current` is decided by the backup policy.** The replacement
+  used to ask the *live* policy whether the caller could `setcurrent` to itself,
+  validate the requested context against the *backup*, and then let the stock
+  handler decide again from the live policy - three answers from two policies. A
+  context only KernelSU's injected rules define (`ksu`, `ksu_file`) is refused by
+  the backup and resolved by the live one, and a caller that may not `setcurrent`
+  to itself is refused before the requested context is even looked at; both
+  return errnos a pristine kernel cannot produce. Both halves now come from the
+  backup: `-EINVAL` for a context it does not define, `-EACCES` for one it
+  defines but does not allow to `setcurrent`. The caller is entered in the
+  backup's sidtab by its context, because the backup holds only the initial sids
+  and a sid from the live table means something else there.
+
+- **A context the pristine policy does not define is answered `-EINVAL` for
+  every caller.** Every rule KernelSU injects names one of its own types on one
+  side (`ksu`, `ksu_file`), and the backup policy predates both, so the rule and
+  the contexts it names describe something that policy has never heard of. The
+  context oracle, the access oracle and `attr/current` now say so *before* the
+  uid gate hands a caller to the stock handler, which would resolve against the
+  live policy - the one that does know them. Without that order, a query written
+  as app_zygote, shell or root reads KernelSU's own rules straight back out: the
+  dirty-policy card's `untrusted_app -> ksu_file:file read: Allowed`. Contexts
+  the pristine policy does know keep exactly the answer they had, and the three
+  hooks are the only filesystem-facing SELinux surfaces in this feature - file,
+  socket and service permission checks happen inside the kernel and never touch
+  them - so nothing else about the phone's SELinux behaviour changes.
+
 ## 6.1 generalization
 
 The first 6.6 implementation invoked an S25U-specific secure monitor command to
