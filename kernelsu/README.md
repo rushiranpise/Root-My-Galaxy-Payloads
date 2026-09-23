@@ -126,10 +126,11 @@ contains the complete source delta from the tagged v3.2.5 tree:
   escape alike, because a path that skips it leaves DEFEX enforcing against a
   task it still reads as root;
 - limit the DEFEX allow path to the current UID-0 task already in `u:r:ksu:s0`,
-  with the wider class - any UID-0 task outside that domain - behind an
-  off-by-default switch, `samsung_defex_broad_root`, writable at
-  `/sys/module/kernelsu/parameters/samsung_defex_broad_root` and logged when it
-  fires;
+  with the wider class - any UID-0 task outside that domain - allowed as well by
+  default, because that is what a working Samsung temp root ships; writing 0 to
+  `samsung_defex_broad_root` under
+  `/sys/module/kernelsu/parameters/` narrows it back to upstream's rule without a
+  rebuild, and the wider path logs pid and comm when it fires;
 - record a syscall-table hook only if the RKP-protected write succeeds;
 - when the dispatcher is unavailable, preserve Manager FD delivery with a
   `__arm64_sys_setresuid` kretprobe that hands the entry point the uid the process
