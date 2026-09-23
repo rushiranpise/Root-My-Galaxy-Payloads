@@ -503,6 +503,366 @@ index 78d9e6a..004bc9a 100644
  }
  
  #if NEED_OWN_STACKPROTECTOR
+diff --git a/kernel/feature/selinux_hide.c b/kernel/feature/selinux_hide.c
+index a57ed013..cb8086fb 100644
+--- a/kernel/feature/selinux_hide.c
++++ b/kernel/feature/selinux_hide.c
+@@ -12,6 +12,8 @@
+ #include <linux/mutex.h>
+ #include <linux/version.h>
+ #include <linux/jump_label.h>
++#include <linux/kprobes.h>
++#include <linux/xarray.h>
+ 
+ // security/selinux/include/security.h
+ #include <security.h>
+@@ -290,6 +292,10 @@
+     KSU_LSM_HOOK_INIT(setprocattr, "selinux_setprocattr", ksu_handle_selinux_setprocattr, 0);
+ #endif
+ 
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
++static void *orig_selinux_setprocattr;
++#endif
++
+ #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 10, 0) &&                                                                   \
+     (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0) || defined(KSU_COMPAT_HAS_LIST_OF_LSM_HOOKS))
+ static setprocattr_fn ksu_orig_setprocattr;
+@@ -382,6 +388,216 @@
+     return ret;
+ }
+ 
++/*
++ * The pointer writes below are what a stock KernelSU does here, and on this
++ * target the kernel refuses them: the slots this feature patches -
++ * sel_handle_status_ops.open, write_op, the LSM table entry - live in the
++ * rodata range handed to the hypervisor at init, so ksu_patch_text() comes back
++ * with an error, and with -EOPNOTSUPP on a build that disables patching
++ * outright. A kprobe reaches the same call site from the other side: kprobe
++ * instruction pages are whitelisted with the hypervisor, so a breakpoint is
++ * accepted where a plain write is not. Every slot therefore tries the write
++ * first and diverts the handler it points at when the write is refused.
++ *
++ * Recursion guard: a replacement calls the original through the captured
++ * pointer, which is the probed address, so that nested call hits the same
++ * probe. The guard is keyed on the calling task rather than a global latch, so
++ * unrelated tasks never block each other, and a task that dies inside a
++ * replacement merely leaks one small xarray entry instead of wedging every
++ * later call into fail-open.
++ */
++static DEFINE_XARRAY(sel_hide_probe_guard);
++
++static bool sel_hide_guard_enter(void)
++{
++    void *old;
++
++    if (xa_load(&sel_hide_probe_guard, (unsigned long)current))
++        return false;
++    old = xa_store(&sel_hide_probe_guard, (unsigned long)current, current, GFP_KERNEL);
++    return !IS_ERR(old);
++}
++
++static void sel_hide_guard_exit(void)
++{
++    xa_erase(&sel_hide_probe_guard, (unsigned long)current);
++}
++
++static int __nocfi sel_hide_status_open_tramp(struct inode *inode, struct file *filp)
++{
++    int ret = my_sel_open_handle_status(inode, filp);
++    sel_hide_guard_exit();
++    return ret;
++}
++
++static ssize_t __nocfi sel_hide_write_context_tramp(struct file *file, char *buf, size_t size)
++{
++    ssize_t ret = my_write_context(file, buf, size);
++    sel_hide_guard_exit();
++    return ret;
++}
++
++static ssize_t __nocfi sel_hide_write_access_tramp(struct file *file, char *buf, size_t size)
++{
++    ssize_t ret = my_write_access(file, buf, size);
++    sel_hide_guard_exit();
++    return ret;
++}
++
++// Always divert: the fake status page has to be served to hidden apps and
++// lazily initialized even while the rest of the feature is disabled, exactly as
++// the permanently patched slot behaves.
++static int sel_hide_status_open_pre(struct kprobe *p, struct pt_regs *regs)
++{
++    if (!sel_hide_guard_enter())
++        return 0;
++    instruction_pointer_set(regs, (unsigned long)sel_hide_status_open_tramp);
++    return 1;
++}
++
++// The rest divert only while the feature is enabled, so a disabled feature
++// answers exactly like the stock kernel.
++static int sel_hide_context_write_pre(struct kprobe *p, struct pt_regs *regs)
++{
++    if (!ksu_selinux_hide_enabled || !sel_hide_guard_enter())
++        return 0;
++    instruction_pointer_set(regs, (unsigned long)sel_hide_write_context_tramp);
++    return 1;
++}
++
++static int sel_hide_access_write_pre(struct kprobe *p, struct pt_regs *regs)
++{
++    if (!ksu_selinux_hide_enabled || !sel_hide_guard_enter())
++        return 0;
++    instruction_pointer_set(regs, (unsigned long)sel_hide_write_access_tramp);
++    return 1;
++}
++
++static struct kprobe sel_hide_status_open_kprobe = {
++    .pre_handler = sel_hide_status_open_pre,
++};
++
++static struct kprobe sel_hide_context_write_kprobe = {
++    .pre_handler = sel_hide_context_write_pre,
++};
++
++static struct kprobe sel_hide_access_write_kprobe = {
++    .pre_handler = sel_hide_access_write_pre,
++};
++
++/*
++ * Register @kp on the function @target. The raw address is tried first; a
++ * kernel that only accepts symbol-based addresses gets the name looked up and
++ * retried, which is the path the tracefs interface exercises on these targets.
++ */
++static int sel_hide_register_probe(struct kprobe *kp, void *target)
++{
++    int ret;
++    char namebuf[KSYM_NAME_LEN];
++    const char *name;
++
++    if (!target) {
++        pr_err("selinux_hide: no handler address to probe\n");
++        return -EINVAL;
++    }
++
++    kp->addr = (kprobe_opcode_t *)target;
++    ret = register_kprobe(kp);
++    if (ret == -EINVAL) {
++        name = kallsyms_lookup((unsigned long)target, NULL, NULL, NULL, namebuf);
++        if (name) {
++            pr_warn("selinux_hide: kprobe on %s by address refused (%d), retrying by name\n", namebuf, ret);
++            kp->addr = NULL;
++            kp->symbol_name = name;
++            ret = register_kprobe(kp);
++            kp->symbol_name = NULL;
++        }
++    }
++    if (ret) {
++        kp->addr = NULL;
++    }
++    return ret;
++}
++
++/*
++ * Route one slot: patch the pointer when the kernel allows it, otherwise divert
++ * the function it points at. Returns 0 when a route was installed and the last
++ * attempt's error otherwise. kp->addr is non-NULL only on the kprobe route,
++ * which is how ksu_selinux_hide_unhook() picks the way back.
++ */
++static int sel_hide_route_slot(struct kprobe *kp, void **slot, void *replacement, void *original, const char *what)
++{
++    int ret = ksu_patch_text(slot, &replacement, sizeof(replacement), KSU_PATCH_TEXT_FLUSH_DCACHE);
++
++    if (!ret) {
++        pr_info("selinux_hide: %s: slot patched\n", what);
++        return 0;
++    }
++
++    pr_warn("selinux_hide: %s: patch_text refused (%d), diverting with a kprobe\n", what, ret);
++    ret = sel_hide_register_probe(kp, original);
++    if (!ret) {
++        pr_info("selinux_hide: %s: kprobe route active\n", what);
++    } else {
++        pr_err("selinux_hide: %s: kprobe err: %d\n", what, ret);
++    }
++    return ret;
++}
++
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
++static int __nocfi sel_hide_setprocattr_tramp(const char *name, void *value, size_t size)
++{
++    int ret = ksu_handle_selinux_setprocattr(name, value, size);
++    sel_hide_guard_exit();
++    return ret;
++}
++
++static int sel_hide_setprocattr_pre(struct kprobe *p, struct pt_regs *regs)
++{
++    if (!ksu_selinux_hide_enabled || !sel_hide_guard_enter())
++        return 0;
++    instruction_pointer_set(regs, (unsigned long)sel_hide_setprocattr_tramp);
++    return 1;
++}
++
++static struct kprobe sel_hide_setprocattr_kprobe = {
++    .pre_handler = sel_hide_setprocattr_pre,
++};
++
++/*
++ * The LSM table entry has no slot pointer we can write, so ksu_lsm_hook() is
++ * the only patching route for it; when that is refused the handler itself is
++ * probed and its address handed to the replacement through hook->original.
++ */
++static int sel_hide_route_setprocattr(void)
++{
++    int ret = ksu_lsm_hook(&selinux_setprocattr_hook);
++
++    if (!ret) {
++        pr_info("selinux_hide: setprocattr: slot patched\n");
++        return 0;
++    }
++
++    pr_warn("selinux_hide: setprocattr: ksu_lsm_hook refused (%d), diverting with a kprobe\n", ret);
++
++    orig_selinux_setprocattr = (void *)find_kernel_symbol_exact("selinux_setprocattr");
++    if (!orig_selinux_setprocattr) {
++        pr_err("selinux_hide: selinux_setprocattr not found!\n");
++        return -ENOENT;
++    }
++    ret = sel_hide_register_probe(&sel_hide_setprocattr_kprobe, orig_selinux_setprocattr);
++    if (!ret) {
++        selinux_setprocattr_hook.original = orig_selinux_setprocattr;
++        pr_info("selinux_hide: setprocattr: kprobe route active\n");
++    } else {
++        pr_err("selinux_hide: setprocattr: kprobe err: %d\n", ret);
++        orig_selinux_setprocattr = NULL;
++    }
++    return ret;
++}
++
++#endif
++
+ static void hook_selinux_status_open()
+ {
+     if (orig_sel_open_handle_status)
+@@ -399,11 +615,15 @@
+         }
+         sel_open_handle_status_slot = &ops->open;
+     }
+-    sel_open_handle_status_fn new_fn = my_sel_open_handle_status;
+     orig_sel_open_handle_status = *sel_open_handle_status_slot;
+-    int ret = ksu_patch_text(sel_open_handle_status_slot, &new_fn, sizeof(new_fn), KSU_PATCH_TEXT_FLUSH_DCACHE);
++    if (!orig_sel_open_handle_status) {
++        pr_err("selinux_hide: sel_open_handle_status is NULL, fake status will not work\n");
++        return;
++    }
++    int ret = sel_hide_route_slot(&sel_hide_status_open_kprobe, (void **)sel_open_handle_status_slot,
++                                  (void *)my_sel_open_handle_status, orig_sel_open_handle_status,
++                                  "sel_open_handle_status");
+     if (ret) {
+-        pr_err("selinux_hide: init: patch_text sel_open_handle_status err: %d\n", ret);
+         sel_open_handle_status_slot = NULL;
+         orig_sel_open_handle_status = NULL;
+     }
+@@ -414,7 +634,11 @@
+ static void ksu_selinux_hide_unhook()
+ {
+     int ret;
+-    if (orig_context_write) {
++    if (sel_hide_context_write_kprobe.addr) {
++        unregister_kprobe(&sel_hide_context_write_kprobe);
++        sel_hide_context_write_kprobe.addr = NULL;
++        orig_context_write = NULL;
++    } else if (orig_context_write) {
+         ret =
+             ksu_patch_text(context_write, &orig_context_write, sizeof(orig_context_write), KSU_PATCH_TEXT_FLUSH_DCACHE);
+         orig_context_write = NULL;
+@@ -422,15 +646,29 @@
+             pr_err("selinux_hide: exit: patch_text context_write err: %d\n", ret);
+         }
+     }
+-    if (orig_access_write) {
++    if (sel_hide_access_write_kprobe.addr) {
++        unregister_kprobe(&sel_hide_access_write_kprobe);
++        sel_hide_access_write_kprobe.addr = NULL;
++        orig_access_write = NULL;
++    } else if (orig_access_write) {
+         ret = ksu_patch_text(access_write, &orig_access_write, sizeof(orig_access_write), KSU_PATCH_TEXT_FLUSH_DCACHE);
+         orig_access_write = NULL;
+         if (ret) {
+             pr_err("selinux_hide: exit: patch_text access_write err: %d\n", ret);
+         }
+     }
++    // The status-open hook is not undone here: upstream keeps it for the boot
++    // and the replacement checks the enabled flag itself, so a disabled feature
++    // still answers like the stock kernel.
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
+-    ksu_lsm_unhook(&selinux_setprocattr_hook);
++    if (sel_hide_setprocattr_kprobe.addr) {
++        unregister_kprobe(&sel_hide_setprocattr_kprobe);
++        sel_hide_setprocattr_kprobe.addr = NULL;
++        orig_selinux_setprocattr = NULL;
++        selinux_setprocattr_hook.original = NULL;
++    } else {
++        ksu_lsm_unhook(&selinux_setprocattr_hook);
++    }
+ #elif LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0) || defined(KSU_COMPAT_HAS_LIST_OF_LSM_HOOKS)
+     if (ksu_orig_setprocattr) {
+         ret = ksu_patch_text((void *)selinux_setprocattr_hook_ptr, &ksu_orig_setprocattr, sizeof(ksu_orig_setprocattr),
+@@ -558,28 +796,27 @@
+ 
+     context_write = &selinux_write_op[SEL_CONTEXT];
+     pr_info("selinux_hide: context_write: 0x%lx [%pSb]\n", (unsigned long)*context_write, *context_write);
+-    write_op_fn my = my_write_context;
+     orig_context_write = *context_write;
+-    ret = ksu_patch_text(context_write, &my, sizeof(my), KSU_PATCH_TEXT_FLUSH_DCACHE);
++    ret = sel_hide_route_slot(&sel_hide_context_write_kprobe, (void **)context_write, (void *)my_write_context,
++                              orig_context_write, "context_write");
+     if (ret) {
+-        pr_err("selinux_hide: init: patch_text context_write err: %d\n", ret);
++        orig_context_write = NULL;
+         goto unhook;
+     }
+ 
+     access_write = &selinux_write_op[SEL_ACCESS];
+     pr_info("selinux_hide: access_write: 0x%lx [%pSb]\n", (unsigned long)*access_write, *access_write);
+-    my = my_write_access;
+     orig_access_write = *access_write;
+-    ret = ksu_patch_text(access_write, &my, sizeof(my), KSU_PATCH_TEXT_FLUSH_DCACHE);
++    ret = sel_hide_route_slot(&sel_hide_access_write_kprobe, (void **)access_write, (void *)my_write_access,
++                              orig_access_write, "access_write");
+     if (ret) {
+-        pr_err("selinux_hide: init: patch_text access_write err: %d\n", ret);
++        orig_access_write = NULL;
+         goto unhook;
+     }
+ 
+ #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0)
+-    ret = ksu_lsm_hook(&selinux_setprocattr_hook);
++    ret = sel_hide_route_setprocattr();
+     if (ret) {
+-        pr_err("selinux_hide: init: selinux_setprocattr_hook err: %d\n", ret);
+         goto unhook;
+     }
+ #elif LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0) || defined(KSU_COMPAT_HAS_LIST_OF_LSM_HOOKS)
+@@ -663,7 +900,6 @@
+     int ret = 0;
+     pr_info("selinux_hide: set to %d\n", enable);
+     mutex_lock(&selinux_hide_mutex);
+-    ksu_selinux_hide_enabled = enable;
+     if (enable) {
+         if (!ksu_selinux_hide_running) {
+             ret = ksu_selinux_hide_enable();
+@@ -677,6 +913,10 @@
+             ksu_selinux_hide_running = false;
+         }
+     }
++    // The flag means "the hooks are in place", not "someone asked for this". It
++    // used to be set before the enable path ran, so a refused enable still read
++    // back as enabled while every probe kept getting stock answers.
++    ksu_selinux_hide_enabled = ksu_selinux_hide_running;
+     mutex_unlock(&selinux_hide_mutex);
+     return ret;
+ }
 diff --git a/kernel/hook/arm64/patch_memory.c b/kernel/hook/arm64/patch_memory.c
 index e9557e2..7cc549b 100644
 --- a/kernel/hook/arm64/patch_memory.c

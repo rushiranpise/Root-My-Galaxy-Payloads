@@ -140,9 +140,55 @@ contains the complete source delta from the tagged v3.2.5 tree:
   syscall kprobes without modifying the syscall table;
 - mark nested sucompat calls so a handler invoking the original syscall cannot
   recursively enter the same kprobe;
+- route `selinux_hide`'s four hook slots through the pointer write first and a
+  kprobe second - `sel_handle_status_ops.open`, `write_op[SEL_CONTEXT]`,
+  `write_op[SEL_ACCESS]` and the `selinux_setprocattr` LSM entry all sit in the
+  rodata range handed to RKP at init, so `ksu_patch_text()` is refused there and
+  the feature used to abort with `-ENOSYS`; a kprobe on the handler that slot
+  points at is accepted, so the feature now installs either way, logs the route
+  each slot took, and stops reporting itself enabled after a refused enable;
 - stage `ksud` at `/data/local/tmp/.ksud-stage`, rename it onto the same
   `/data` filesystem before loading the module, then finish labels/assets after
   the module is active.
+
+### The `selinux_hide` fallback
+
+`selinux_hide` hides KernelSU's SELinux labels by redirecting four hooks:
+`sel_handle_status_ops.open` (the fake status page), `write_op[SEL_CONTEXT]`,
+`write_op[SEL_ACCESS]` (the context/access oracles) and the
+`selinux_setprocattr` entry in the LSM table. The stock code writes a new
+function pointer into each slot. On a KDP/RKP target those slots are inside the
+rodata range the hypervisor is told about at init, the write is refused, and
+the feature returns `-ENOSYS` - which the manager shows as `error -38`.
+
+A kprobe reaches the same call site from the other side. Kprobe instruction
+pages are whitelisted with the hypervisor, so `register_kprobe()` is accepted
+where a plain write is not - a breakpoint is a `BRK` written into kernel text,
+which is how `avc_spoof` and the DEFEX enforce hook already work on this
+hardware. `ksu_patch_text` is therefore tried first and the kprobe registered
+only when it fails, which also makes a `CONFIG_KSU_SAMSUNG_NO_PATCH_TEXT`
+build work unchanged: there `ksu_patch_text` returns `-EOPNOTSUPP` outright and
+the probe route is the one taken.
+
+Each replacement is reached by setting the instruction pointer from the probe's
+pre-handler, and calls the original through the captured pointer. That call is
+the probed address, so it re-enters the same probe; a per-task xarray guard
+lets the nested call fall through. The guard is keyed on the task rather than a
+global latch, so unrelated tasks never block each other, and a task that dies
+inside a replacement leaks one small entry instead of wedging later calls into
+fail-open.
+
+The route each slot takes is in the log, one line per slot:
+
+```sh
+su -c 'dmesg | grep -E "selinux_hide: (context_write|access_write|setprocattr|sel_open_handle_status):"'
+```
+
+`slot patched` is the stock path, `kprobe route active` is the fallback, and a
+`kprobe err:` line is a slot that could not be diverted at all. `ksud feature
+get selinux_hide` now reports 0 after a refused enable: the flag is set from the
+enable path's result instead of before it, so it no longer reads as enabled
+while every probe is still answered by the stock kernel.
 
 ## 6.1 generalization
 
