@@ -852,6 +852,28 @@
       }
     },
     {
+      "payloadId": "gts9-X710XXS6EZF1-rsksu420",
+      "displayName": "Galaxy Tab S9 SM-X710 | Kernel 5.15.189 (X710XXS6EZF1) | ReSukiSU 4.2.0-rc3 (test)",
+      "models": [
+        "SM-X710"
+      ],
+      "kernelVersions": [
+        "5.15.189"
+      ],
+      "flavor": "resukisu",
+      "requiresFreshP0Session": true,
+      "exploit": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/artifacts/gts9-X710XXS6EZF1/cve-2026-43499-app.so",
+        "size": 133160
+      },
+      "kernelsu": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-rsksu-gts9-X710XXS6EZF1-kdp",
+        "size": 4384520,
+        "sha256": "c555101c12ae5ca57eaf0763a3fa35eb9735fab9f4e73475cd51ccd18d44d4b2",
+        "version": "4.2.0-rc3"
+      }
+    },
+    {
       "payloadId": "gts9-X710XXS6EZF1-ksun340",
       "displayName": "Galaxy Tab S9 SM-X710 | Kernel 5.15.189 (X710XXS6EZF1) | KernelSU-Next 3.4.0 (test)",
       "models": [
