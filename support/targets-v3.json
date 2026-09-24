@@ -121,6 +121,25 @@
       }
     },
     {
+      "payloadId": "psq-S9370ZCS9CZG1-ksun340",
+      "displayName": "Galaxy S25 Edge | Kernel 6.6.98 | KernelSU-Next 3.4.0 (test)",
+      "models": [
+        "SM-S9370"
+      ],
+      "kernelVersions": ["6.6.98"],
+      "flavor": "kernelsu-next",
+      "exploit": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/artifacts/psq-S9370ZCS9CZG1/cve-2026-43499-app.so",
+        "size": 126848
+      },
+      "kernelsu": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-next-psq-S9370ZCS9CZG1-kdp",
+        "size": 4230992,
+        "sha256": "104ed5f6f2748d76806ef8e6968f2d8c1689b63a3ff85c6c9651190cf97b7ed3",
+        "version": "3.4.0"
+      }
+    },
+    {
       "payloadId": "q7q-F966USQU9BZDN",
       "displayName": "Galaxy Z Fold 7 | Kernel 6.6.98",
       "models": ["SM-F966U", "SM-F966U1"],
