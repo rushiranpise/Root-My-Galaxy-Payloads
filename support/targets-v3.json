@@ -674,6 +674,23 @@
       }
     },
     {
+      "payloadId": "dm1q-S911U1UES6DYI3-rsksu420",
+      "displayName": "Galaxy S23 (base) | Kernel 5.15.153 | tracefs/MCAST route | ReSukiSU 4.2.0-rc3 (test)",
+      "models": ["SM-S911U1"],
+      "kernelVersions": ["5.15.153"],
+      "flavor": "resukisu",
+      "exploit": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/artifacts/dm1q-S911U1UES6DYI3/cve-2026-43499-app.so",
+        "size": 133016
+      },
+      "kernelsu": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-rsksu-dm1q-S911U1UES6DYI3-kdp",
+        "size": 4384520,
+        "sha256": "91b19000a56a13a221a65a4d8c4abc829f6eadb37ec484cabfba65e2a2a59764",
+        "version": "4.2.0-rc3"
+      }
+    },
+    {
       "payloadId": "dm1q-S911U1UES6DYI3-ksun340",
       "displayName": "Galaxy S23 (base) | Kernel 5.15.153 | tracefs/MCAST route | KernelSU-Next 3.4.0 (test)",
       "models": ["SM-S911U1"],
