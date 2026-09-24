@@ -852,6 +852,28 @@
       }
     },
     {
+      "payloadId": "gts9-X710XXS6EZF1-ksun340",
+      "displayName": "Galaxy Tab S9 SM-X710 | Kernel 5.15.189 (X710XXS6EZF1) | KernelSU-Next 3.4.0 (test)",
+      "models": [
+        "SM-X710"
+      ],
+      "kernelVersions": [
+        "5.15.189"
+      ],
+      "flavor": "kernelsu-next",
+      "requiresFreshP0Session": true,
+      "exploit": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/artifacts/gts9-X710XXS6EZF1/cve-2026-43499-app.so",
+        "size": 133160
+      },
+      "kernelsu": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-next-gts9-X710XXS6EZF1-kdp",
+        "size": 4248144,
+        "sha256": "40b21d070d26a065bfe1108a37de000454299bb7d16ce79b350ea88dbaa12207",
+        "version": "3.4.0"
+      }
+    },
+    {
       "payloadId": "e3q-S9280ZCS6DZF2",
       "displayName": "Galaxy S24 Ultra China | Kernel 6.1.145 (S9280ZCS6DZF2)",
       "models": ["SM-S9280"],
