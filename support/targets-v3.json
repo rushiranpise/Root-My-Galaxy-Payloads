@@ -65,6 +65,25 @@
       }
     },
     {
+      "payloadId": "pa2q-S9360ZCSCCZG1-rsksu420",
+      "displayName": "Galaxy S25+ | Kernel 6.6.98 | ReSukiSU 4.2.0-rc3 (test)",
+      "models": [
+        "SM-S9360"
+      ],
+      "kernelVersions": ["6.6.98"],
+      "flavor": "resukisu",
+      "exploit": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/artifacts/pa2q-S9360ZCSCCZG1/cve-2026-43499-app.so",
+        "size": 126848
+      },
+      "kernelsu": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-rsksu-pa2q-S9360ZCSCCZG1-kdp",
+        "size": 4366600,
+        "sha256": "953a6317cfe66e5ec62e6b557a942477eb92b4a322a489889b4928879e85c5c5",
+        "version": "4.2.0-rc3"
+      }
+    },
+    {
       "payloadId": "psq-S9370ZCS9CZG1",
       "displayName": "Galaxy S25 Edge | Kernel 6.6.98",
       "models": [
