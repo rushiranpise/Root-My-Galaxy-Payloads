@@ -434,6 +434,24 @@
       }
     },
     {
+      "payloadId": "r12s-S721BXXSCDZF3-ksun340",
+      "displayName": "Galaxy S24 FE | Kernel 6.1.157 | KernelSU-Next 3.4.0 (test)",
+      "models": ["SM-S721B"],
+      "kernelVersions": ["6.1.157"],
+      "flavor": "kernelsu-next",
+      "requiresFreshP0Session": true,
+      "exploit": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/artifacts/r12s-S721BXXSCDZF3/cve-2026-43499-app.so",
+        "size": 141376
+      },
+      "kernelsu": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-next-r12s-S721BXXSCDZF3-kdp",
+        "size": 4251600,
+        "sha256": "e28ba63ed1d63c9d77629d1c1c3948327c0e9a9f2dfa5f1f8abe403416caedfb",
+        "version": "3.4.0"
+      }
+    },
+    {
       "payloadId": "gts9-X710XXS6EZF1",
       "displayName": "Galaxy Tab S9 SM-X710 | Kernel 5.15.189 (X710XXS6EZF1)",
       "models": [
