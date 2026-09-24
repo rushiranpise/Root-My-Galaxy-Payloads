@@ -71,6 +71,11 @@ DAEMON_VERSION = re.compile(
 # is what `KernelSuFlavor.id` in the app compares, and a feed that named the wrong one would offer a
 # device a daemon built for another kernel.
 FLAVOURS = {"": "kernelsu", "-next": "kernelsu-next", "-rsksu": "resukisu"}
+# The other direction: the prefix a payload id carries for each flavour, which is what `VERSIONED_ID`
+# above reads back. The two live together because they are one table written both ways, and a prefix
+# invented on the writing side - where a new flavour's entry is created - would be an id this file no
+# longer recovers the pair from, silently: the entry would simply stop being rebuildable.
+ID_PREFIXES = {"kernelsu": "ksu", "kernelsu-next": "ksun", "resukisu": "rsksu"}
 # `S938USQSCCZF9`: the build id in a payload id or a target id.
 BUILD_ID = re.compile(r"^[a-z0-9]+-[A-Z][A-Z0-9]{6,}$")
 

@@ -848,7 +848,15 @@ jobs:
           version=$(sed -n 's/^ref=//p' kernelsu/module-version.txt)
           test -n "$version" || { echo "::error::the module receipt names no ref"; exit 1; }
           echo "the entry will be named for $version"
-          args=(--repo . --daemon "$daemon" --artifact "kernelsu/$daemon" --version "$version"
+          # `--create` is on unconditionally, and it is the no-op it looks like being when the entry is
+          # already there: the tool rewrites the entry serving this daemon when it finds one, and only
+          # adds an entry when there is none - which is how a second flavour reaches a target that has
+          # only ever been served the first. It is part of this step rather than a step before it
+          # because the entry and the artifact it names have to arrive in the same commit: an entry whose
+          # daemon does not exist yet is a payload the app offers and then fails to download. The new
+          # entry's device row is copied from the one already serving `ksud-<target>-kdp`, so a daemon
+          # name that is merely wrong is still refused rather than invented onto a target.
+          args=(--repo . --daemon "$daemon" --artifact "kernelsu/$daemon" --version "$version" --create
                 --url-prefix "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}")
           if [ -n "$MIGRATE" ]; then
             args+=(--migrate)

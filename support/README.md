@@ -22,6 +22,15 @@ built from, such as `3.4.0`. A pair rebuilt by CI declares one, taken from the t
 manager of the KernelSU a run will actually stage - the daemon and the manager have to be the same
 release - and falls back to the flavour's own release for an entry that declares none.
 
+An entry may also declare `flavor`: which project's KernelSU its `kernelsu` artifact is, one of
+`kernelsu`, `kernelsu-next` or `resukisu`. The app compares it against the three projects it knows
+and offers that flavour's manager; an entry that declares none is the plain `kernelsu` one, which is
+what every entry written before flavours existed is. One device can be served by several flavours at
+once - the app shows them as a row of chips to choose between - so the two entries differ in this
+field and in the artifact they name, and nothing else. `tools/update_feed.py --create` writes one
+beside an entry that already serves the device, which is how a second flavour reaches a target that
+has only ever been served the first.
+
 An entry may additionally set `requiresFreshP0Session` to `true` when slide
 discovery and exploitation must run in the same payload process. The app then
 disables its per-boot P0 cache for that profile and gives the single combined

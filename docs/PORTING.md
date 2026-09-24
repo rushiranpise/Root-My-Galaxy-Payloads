@@ -439,6 +439,15 @@ manifest. Update artifact sizes, validate the final JSON, and confirm that Root
 My Galaxy can parse it before publishing. The minimal fields are documented in
 [`../support/README.md`](../support/README.md).
 
+A flavour is not a separate port. Reaching a device with a second KernelSU is the same publish run
+with `flavor=kernelsu-next` (or `resukisu`) and `target_id` left as the target already in the feed:
+the pair is built from that flavour's patch, and the publish step adds the entry beside the one the
+device already has, copying its model list, kernel versions and exploit. That entry is also what
+makes the pair rebuildable, so `upstream-watch.yml` maintains the new flavour from then on without
+anything else being written down. The run needs no per-device document, because the release it has to
+claim is read out of the module already published for the target - see
+[`../tools/pairs.py`](../tools/pairs.py).
+
 ## 9. Cleanup policy
 
 After the profile, documentation, and builds have been verified:
