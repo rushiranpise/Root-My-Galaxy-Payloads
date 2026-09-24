@@ -536,6 +536,24 @@
       }
     },
     {
+      "payloadId": "dm3q-S918BXXSAFZF5-rsksu420",
+      "displayName": "Galaxy S23 Ultra SM-S918B | Kernel 5.15.189 (S918BXXSAFZF5) | ReSukiSU 4.2.0-rc3 (test)",
+      "models": ["SM-S918B"],
+      "kernelVersions": ["5.15.189"],
+      "flavor": "resukisu",
+      "requiresFreshP0Session": true,
+      "exploit": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/artifacts/dm3q-S918BXXSAFZF5/cve-2026-43499-app.so",
+        "size": 135752
+      },
+      "kernelsu": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-rsksu-dm3q-S918BXXSAFZF5-kdp",
+        "size": 4384520,
+        "sha256": "68f6429cbb38f0ee6169d29998b0689501b3a0af5cae718353d8f2b77970705c",
+        "version": "4.2.0-rc3"
+      }
+    },
+    {
       "payloadId": "dm3q-S918BXXSAFZF5-ksun340",
       "displayName": "Galaxy S23 Ultra SM-S918B | Kernel 5.15.189 (S918BXXSAFZF5) | KernelSU-Next 3.4.0 (test)",
       "models": ["SM-S918B"],
