@@ -121,6 +121,25 @@
       }
     },
     {
+      "payloadId": "psq-S9370ZCS9CZG1-rsksu420",
+      "displayName": "Galaxy S25 Edge | Kernel 6.6.98 | ReSukiSU 4.2.0-rc3 (test)",
+      "models": [
+        "SM-S9370"
+      ],
+      "kernelVersions": ["6.6.98"],
+      "flavor": "resukisu",
+      "exploit": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/artifacts/psq-S9370ZCS9CZG1/cve-2026-43499-app.so",
+        "size": 126848
+      },
+      "kernelsu": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-rsksu-psq-S9370ZCS9CZG1-kdp",
+        "size": 4366600,
+        "sha256": "e3ea3095017c998f9f047fe6864f8aabe5a07ed88e8150caebc13c5933047257",
+        "version": "4.2.0-rc3"
+      }
+    },
+    {
       "payloadId": "psq-S9370ZCS9CZG1-ksun340",
       "displayName": "Galaxy S25 Edge | Kernel 6.6.98 | KernelSU-Next 3.4.0 (test)",
       "models": [
