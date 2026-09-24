@@ -453,6 +453,24 @@
       }
     },
     {
+      "payloadId": "e3q-S9280ZCS6DZF2-rsksu420",
+      "displayName": "Galaxy S24 Ultra China | Kernel 6.1.145 (S9280ZCS6DZF2) | ReSukiSU 4.2.0-rc3 (test)",
+      "models": ["SM-S9280"],
+      "kernelVersions": ["6.1.145"],
+      "flavor": "resukisu",
+      "requiresFreshP0Session": true,
+      "exploit": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/artifacts/e3q-S9280ZCS6DZF2/cve-2026-43499-app.so",
+        "size": 127120
+      },
+      "kernelsu": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-rsksu-e3q-S9280ZCS6DZF2-kdp",
+        "size": 4387336,
+        "sha256": "914d93fe8d2d8b962b94bbbc6a3f4cfd278b5335bda81334702c07b7fdfdee69",
+        "version": "4.2.0-rc3"
+      }
+    },
+    {
       "payloadId": "pa3q-S938USQSCCZF9-ksu330",
       "displayName": "Galaxy S25 Ultra | KernelSU 3.3.0 (test)",
       "models": ["SM-S938U1"],
