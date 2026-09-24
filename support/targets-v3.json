@@ -160,6 +160,23 @@
       }
     },
     {
+      "payloadId": "e3q-S928USQS6DZF2-rsksu420",
+      "displayName": "Galaxy S24 Ultra | Kernel 6.1.145 | ReSukiSU 4.2.0-rc3 (test)",
+      "models": ["SM-S928U1", "SM-S928W"],
+      "kernelVersions": ["6.1.145"],
+      "flavor": "resukisu",
+      "exploit": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/artifacts/e3q-S928USQS6DZF2/cve-2026-43499-app.so",
+        "size": 126440
+      },
+      "kernelsu": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-rsksu-e3q-S928USQS6DZF2-kdp",
+        "size": 4387336,
+        "sha256": "334ca6e1fbb267f35a46f45badcaef5d78aaa4bf366268b46ddebfc855d3f9b8",
+        "version": "4.2.0-rc3"
+      }
+    },
+    {
       "payloadId": "e3q-S928USQS6DZF2-ksun340",
       "displayName": "Galaxy S24 Ultra | Kernel 6.1.145 | KernelSU-Next 3.4.0 (test)",
       "models": ["SM-S928U1", "SM-S928W"],
