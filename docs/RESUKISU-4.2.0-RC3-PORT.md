@@ -206,6 +206,18 @@ The daemon file name carries no version, so the publish rewrites the `rc2` entry
 sibling. Nothing in the app moves for this release: the flavour is chosen by the payload's own `flavor`
 field and the sheet reads the version out of the entry, so a rebuilt pair is the whole of the change.
 
+### The label the first publish left behind
+
+The rebuild's own publish step rewrote the entry's `version` to `4.2.0-rc3` and left its `displayName`
+reading `ReSukiSU 4.2.0-rc2` - the two facts the Next record insists are one fact, disagreeing in the
+feed. The cause is a pre-release and the id arithmetic: `update_feed.py` retitled the label only when
+the payload id's numeric suffix moved, and `4.2.0-rc2` and `4.2.0-rc3` both derive `420`, so the id
+correctly stayed and the label silently did not follow. The tool now retitles the label from the version
+string on its own, replacing the version it spells out whole so the old `-rc2` is consumed rather than
+left trailing a new `-rc3`, and the rc2 → rc3 case is in its self-test. The entry reads `4.2.0-rc3` in
+both places now. This is the second time a ReSukiSU release has taught the feed tooling about
+pre-releases; the first was `check_pair_version.py` learning that `4.2.0-rc2` is a version name at all.
+
 ## Deliberately not ported or changed
 
 - **Upstream's single-copy `install`.** Merging the two functions back together would undo the reason the
