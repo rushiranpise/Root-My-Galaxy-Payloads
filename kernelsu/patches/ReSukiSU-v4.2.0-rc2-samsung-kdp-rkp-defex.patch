@@ -233,7 +233,7 @@ new file mode 100644
 index 0000000..b882f09
 --- /dev/null
 +++ b/kernel/compat/samsung_kdp.c
-@@ -0,0 +1,209 @@
+@@ -0,0 +1,210 @@
 +#include <linux/completion.h>
 +#include <linux/cred.h>
 +#include <linux/errno.h>
