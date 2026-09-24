@@ -53,6 +53,22 @@ def _version_text(code: str) -> str | None:
     return f"{int(digits[:-2])}.{minor}.{patch}" if len(digits) > 3 else f"{major}.{minor}.{patch}"
 
 
+def _retitled(display: str, old_text: str | None, version: str) -> str:
+    """`... ReSukiSU 4.2.0-rc2 (test)` -> `... ReSukiSU 4.2.0-rc3 (test)`.
+
+    The version a display name spells out is replaced whole, pre-release suffix included. The
+    numeric part is what the payload id already carries, and a pre-release moves without moving it -
+    `4.2.0-rc2` and `4.2.0-rc3` both derive `420`, so an id that stayed put while the label only
+    followed the id would keep naming the build it replaced. `4.2.0` is a prefix of both, so a plain
+    substring replace would leave the old suffix behind on the new one.
+    """
+    wanted = version.lstrip("vV")
+    if not old_text or old_text not in display or wanted == old_text:
+        return display
+    pattern = re.escape(old_text) + r"(?:[-.][0-9A-Za-z.]+)?"
+    return re.sub(pattern, lambda _: wanted, display, count=1)
+
+
 def _digest(path: str) -> tuple[int, str]:
     import hashlib
 
@@ -220,17 +236,25 @@ def apply(
             if new_code and new_code != old_code:
                 after_id = f"{payload_id[: -len(old_code)]}{new_code}"
                 body = body.replace(f'"payloadId": "{payload_id}"', f'"payloadId": "{after_id}"', 1)
-                old_text = _version_text(old_code)
-                if old_text and old_text in display:
-                    after_display = display.replace(old_text, version.lstrip("vV"))
-                    body = body.replace(f'"displayName": "{display}"', f'"displayName": "{after_display}"', 1)
+            # The display name is retitled on its own, not as part of the id move: the two only
+            # travel together for releases whose numeric code changed, and a pre-release pair
+            # rebuilt onto a new candidate is exactly the case where the id must stay and the
+            # label must not.
+            after_display = _retitled(display, _version_text(old_code), version)
+            if after_display != display:
+                body = body.replace(f'"displayName": "{display}"', f'"displayName": "{after_display}"', 1)
 
         rebuilt.append(text[cursor:start])
         rebuilt.append(body)
         cursor = end
         changes.append(
             {
-                "before": {"payloadId": payload_id, "url": url, "size": artifact.get("size")},
+                "before": {
+                    "payloadId": payload_id,
+                    "displayName": display,
+                    "url": url,
+                    "size": artifact.get("size"),
+                },
                 "after": {
                     "payloadId": after_id,
                     "displayName": after_display,
@@ -343,7 +367,35 @@ def self_test() -> int:
             print(f"  {payload_id}: expected {expected}, got {actual}")
             failures += 1
 
-    print(f"self-test: 1 entry shape, 4 payload ids, {failures} failure(s)")
+    # A pre-release moves the label without moving the payload id's number: `4.2.0-rc2` and
+    # `4.2.0-rc3` both derive `420`, so this is the case the id comparison cannot see - and the one
+    # that left a republished rc3 pair still named rc2.
+    for display, old_text, version, expected in (
+        (
+            "Galaxy S25 Ultra | ReSukiSU 4.2.0-rc2 (test)",
+            "4.2.0",
+            "v4.2.0-rc3",
+            "Galaxy S25 Ultra | ReSukiSU 4.2.0-rc3 (test)",
+        ),
+        (
+            "Galaxy S25 Ultra | KernelSU 3.3.0 (test)",
+            "3.3.0",
+            "v3.4.0",
+            "Galaxy S25 Ultra | KernelSU 3.4.0 (test)",
+        ),
+        (
+            "Galaxy S25 Ultra | KernelSU-Next 3.4.0 (test)",
+            "3.4.0",
+            "v3.4.0",
+            "Galaxy S25 Ultra | KernelSU-Next 3.4.0 (test)",
+        ),
+    ):
+        actual = _retitled(display, old_text, version)
+        if actual != expected:
+            print(f"  retitle {display!r} -> {actual!r}, wanted {expected!r}")
+            failures += 1
+
+    print(f"self-test: 1 entry shape, 4 payload ids, 3 retitles, {failures} failure(s)")
     return 1 if failures else 0
 
 
@@ -464,7 +516,7 @@ def main() -> int:
         print(f"  url  {before['url']}")
         print(f"   ->  {after['url']}")
         print(f"  size {before['size']} -> {after['size']}")
-        if before["payloadId"] != after["payloadId"]:
+        if before["displayName"] != after["displayName"]:
             print(f"  name {after['displayName']}")
     print(f"{len(changes)} feed entr{'y' if len(changes) == 1 else 'ies'} updated{' (dry run)' if arguments.dry_run else ''}")
     return 0
