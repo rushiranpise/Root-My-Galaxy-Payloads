@@ -304,6 +304,13 @@ traps (DDK image, exact target release, assembler and libclang for `ksud`, `fetc
    build's own output against the checkout it built — a full-history checkout, or the job fails.
 3. **DDK release unchanged.** `ddk_release=20260828`, as upstream's own `ddk-lkm.yml` still defaults to.
 4. **The `ksud` job builds more than it did**, because of the LKM-injection work in this range.
+5. **The 5.15 family needs the ucount guard, and the patch carries it.** `kernel/compat/samsung_kdp.c`
+   declares two function-pointer typedefs whose second parameter is the ucounts enum. Samsung's
+   `android13-5.15` still names that type `enum ucount_type` — only 5.16+ renamed it `enum rlimit_type` —
+   so the unguarded name is an implicitly declared, incomplete type there and clang refuses the file with
+   `-Wvisibility`. The patch now picks the name by `LINUX_VERSION_CODE`, exactly as
+   `KernelSU-v3.3.0-samsung-kdp-rkp-defex.patch` already does, which is what lets the four
+   `android13-5.15` targets build this flavour at all.
 
 For a publishable pair for the S25U target, which is what the feed serves:
 

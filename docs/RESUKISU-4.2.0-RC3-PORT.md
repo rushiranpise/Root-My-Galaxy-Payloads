@@ -176,6 +176,12 @@ folded the two conflicts together.
 | the Samsung shortcuts did not drift | `tools/check_rkp_branch.py --tree <tree>` exits 0 on the patched rc3 tree: the early-return branch registers none of the normal path's 4 registrations (intended), the late-load branch skips only `ksu_selinux_hide_drop_backup_if_unused()`, and `ksu_handle_setuid()` is read as taking the uid moved *to* as argument 0 - the convention the delta's kretprobe passes |
 | the tools still hold | `pairs.py --self-test` 19/19, `check_pair_version.py --self-test` 14/14 |
 
+One build fix lives in the patch itself, for the 5.15 family: `kernel/compat/samsung_kdp.c` declares two
+function-pointer typedefs whose second parameter is the ucounts enum, which Samsung's `android13-5.15`
+still names `enum ucount_type` and only 5.16+ renamed `enum rlimit_type`. Declared unguarded, that name is
+an implicitly declared, incomplete type on 5.15 and clang fails the compile with `-Wvisibility`; the patch
+now selects it by `LINUX_VERSION_CODE`, matching `KernelSU-v3.3.0-samsung-kdp-rkp-defex.patch`.
+
 **What that does not establish.** Nothing was compiled: no module, no `ksud`, no DDK container, no
 `cargo`, and no device. The symbol audit (`kernel/check_symbol` against a recovered `vmlinux`) and the
 relocation/CRC audit were not run against this tree. The validation bar in the rc2 record - late-load
