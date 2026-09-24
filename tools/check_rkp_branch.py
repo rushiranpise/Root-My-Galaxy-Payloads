@@ -24,6 +24,12 @@ That function is where `ksu_avc_spoof_late_init()` arms the hook, so on a late-l
 was registered and enabled and yet never armed. `kernel/core/init.c` therefore calls it on the late-load
 path, and `REQUIRED_ON_LATE_LOAD` below is what must stay there.
 
+Both this and the registration above are read out of a *patched checkout* by `--tree`, which every build
+job does. That leaves one way for the arming to go missing again unpunished: the published patches are
+per flavour and ref, and only the ref a run asks for is ever applied - so the 3.4.0 patch is unguarded
+until somebody builds `v3.4.0`, however long that is. `--patches` closes that by reading the diffs
+themselves, which needs no checkout and no network at all.
+
 **The setuid hand-off.** The kretprobe stands in for the dispatcher's `ksu_hook_setresuid()`, which knew
 both uids - the one the process was leaving (`old_uid`, captured before the call) and the one it moved to
 (`current_uid()` after it) - and passed them to the tree's setuid entry point in the order *that tree*
@@ -43,10 +49,11 @@ rather than remembered; the third resolves the order out of the tree rather than
 passes on both conventions and fails only on the mismatch.
 
     tools/check_rkp_branch.py --tree KernelSU     # a checkout the patch has already been applied to
-    tools/check_rkp_branch.py --self-test         # prove all three checks can fail
+    tools/check_rkp_branch.py --patches kernelsu/patches   # every published patch, with no checkout
+    tools/check_rkp_branch.py --self-test         # prove every check can fail
 
 Exit status is 0 when every shortcut is complete (or absent, which is the other way to be complete), 1
-when something is missing, 2 on an unreadable tree.
+when something is missing, 2 on an unreadable tree or an unreadable patch.
 """
 
 from __future__ import annotations
@@ -74,6 +81,19 @@ BOOT_COMPLETED = "void on_boot_completed(void)"
 # `ksu_avc_spoof_late_init()` sets the feature's own boot-completed flag and arms its kprobe; without
 # it the switch reads enabled and nothing is hooked.
 REQUIRED_ON_LATE_LOAD = {"ksu_avc_spoof_late_init"}
+
+# Where the published patches live, and how to find one file section and one hunk inside a diff.
+# Read by section and hunk rather than as text: what a patch *adds* is the thing to check, and a hunk
+# of another file can say the same words in its context.
+PATCHES = Path("kernelsu/patches")
+DIFF_SECTION = re.compile(r"^diff --git a/(\S+) b/(\S+)\s*$", re.M)
+HUNK_HEADER = re.compile(r"^@@", re.M)
+
+# The feature as a patch names it, the call that arms it on the late path, and the line the upstream
+# late-load branch sets - which is what tells that hunk from every other hunk of the same file.
+SPOOF = "ksu_avc_spoof"
+LATE_ARM = "ksu_avc_spoof_late_init"
+LATE_BRANCH_CUE = "ksu_boot_completed = true"
 
 # The registrations the first check is about are named `_init`. The other things that get registered in
 # that function are syscall plumbing — `register_trace_prio_sys_enter`, `ksu_register_syscall_hook`,
@@ -355,6 +375,88 @@ def late_load(boot_event_text: str, init_text: str) -> tuple[set[str], set[str],
     return done, skipped, sorted(required - done)
 
 
+def patch_hunks(text: str) -> dict[str, list[list[str]]]:
+    """{path: [hunk lines]} for every file a diff touches.
+
+    A hunk's lines keep their leading character, so `+` is an addition and a space is context, and the
+    diff's own header lines - `index`, `---`, `+++` - are dropped with the text before the first `@@`.
+    That is what lets a caller ask what a patch *leaves the file calling* rather than what it mentions:
+    the comment this delta puts above the call names the call too.
+
+    The path is normalised to `/`, which is what git writes: a diff that went through a tool which
+    rewrote the separators still answers to a lookup by `Path.as_posix()`, rather than reporting the
+    file as untouched.
+    """
+    sections: dict[str, list[list[str]]] = {}
+    headers = list(DIFF_SECTION.finditer(text))
+    for index, header in enumerate(headers):
+        end = headers[index + 1].start() if index + 1 < len(headers) else len(text)
+        hunks = [hunk.splitlines() for hunk in HUNK_HEADER.split(text[header.end() : end])[1:]]
+        sections.setdefault(header.group(2).replace("\\", "/"), []).extend(hunks)
+    return sections
+
+
+def added_code(hunk: list[str]) -> str:
+    """What a hunk adds, with its comments removed.
+
+    Comments out, because the line above the call in this delta explains it and would otherwise be read
+    as the call - a check that a comment can satisfy is a check that says nothing.
+    """
+    return without_comments("\n".join(line[1:] for line in hunk if line.startswith("+")))
+
+
+def patch_arms_the_spoof(text: str) -> tuple[str, str]:
+    """("absent" | "ok" | "missing", detail) for one patch.
+
+    The requirement is read out of the patch rather than asserted: a patch whose tree has no spoof
+    feature at all - the tiann leg, whose `on_boot_completed()` arms nothing - is answered `absent` and
+    is not a failure, which is the same way `late_load` treats that tree.
+    """
+    if SPOOF not in text:
+        return "absent", f"does not name {SPOOF}, so this tree has no feature to arm"
+    for hunk in patch_hunks(text).get(CORE_INIT.as_posix(), []):
+        context = without_comments("\n".join(line[1:] for line in hunk if line[:1] in (" ", "+")))
+        if LATE_BRANCH_CUE in context and re.search(rf"\b{LATE_ARM}\s*\(", added_code(hunk)):
+            return "ok", f"arms the spoof beside `{LATE_BRANCH_CUE}` in {CORE_INIT.as_posix()}"
+    if LATE_ARM not in text:
+        return "missing", f"never leaves {CORE_INIT.as_posix()} calling {LATE_ARM}()"
+    return "missing", (
+        f"names {LATE_ARM}() but not in a hunk that sits beside `{LATE_BRANCH_CUE}`, "
+        "so it is not on the late-load path"
+    )
+
+
+def check_patches(directory: Path) -> int:
+    """Every published patch that carries the spoof has to arm it on the late-load path.
+
+    No checkout and no network: the diffs are the whole input, which is what makes this able to cover a
+    flavour and ref that no run of the build workflow ever asks for.
+    """
+    files = sorted(directory.glob("*.patch"))
+    if not files:
+        print(f"error: no patch under {directory}", file=sys.stderr)
+        return 2
+
+    status = 0
+    for path in files:
+        try:
+            text = path.read_text(encoding="utf-8", errors="surrogateescape")
+        except OSError as error:
+            print(f"error: cannot read {error.filename}: {error}", file=sys.stderr)
+            return 2
+        state, detail = patch_arms_the_spoof(text)
+        if state != "missing":
+            print(f"{path}: {detail}")
+            continue
+        print(f"error: {path} {detail}")
+        print("       A late-loaded module never runs `on_boot_completed()`, which is where upstream arms")
+        print("       this hook, so the feature is registered and its switch reads enabled while the")
+        print("       kprobe that suppresses the denial is never registered. That is the delta's own")
+        print("       late load - the path that reaches a locked device - so it is every device's case.")
+        status = 1
+    return status
+
+
 def self_test() -> int:
     """The fixtures that matter: each check correct, and each able to fail on the defect it exists for."""
 
@@ -471,6 +573,43 @@ int {ENTRY}(uid_t ruid, uid_t euid, uid_t suid)
 }}
 """
 
+    # The patch reader, which is what covers a patch no run applies. Four shapes: the arming in the
+    # late-load hunk, the call only in the comment above it, the call added in another hunk of the
+    # same file, and a tree with no feature to arm at all.
+    core = CORE_INIT.as_posix()
+
+    def patch(hunks: str) -> str:
+        return (
+            f"diff --git a/{core} b/{core}\n"
+            f"index 1111111..2222222 100644\n"
+            f"--- a/{core}\n"
+            f"+++ b/{core}\n"
+            f"{hunks}"
+        )
+
+    armed = (
+        "@@ -166,6 +189,10 @@ int __init kernelsu_init(void)\n"
+        " \t\tksu_file_wrapper_init();\n"
+        " \n"
+        " \t\tksu_boot_completed = true;\n"
+        "+\n"
+        "+// What on_boot_completed() does for a module that was present at boot. A late-loaded\n"
+        "+// one never gets the event, so the phone being past boot here is the cue to arm it.\n"
+        f"+\t\t{LATE_ARM}();\n"
+        " \t\ttrack_throne(false);\n"
+        " \n"
+        " \t\tif (!getenforce()) {\n"
+    )
+
+    # The cue in one hunk and the call in another: named by the file, on no path at all.
+    apart = (
+        "@@ -166,6 +189,7 @@ int __init kernelsu_init(void)\n"
+        " \t\tksu_boot_completed = true;\n"
+        "+\t\ttrack_throne(false);\n"
+        "@@ -400,6 +424,7 @@ static void ksu_something_else(void)\n"
+        f"+\t{LATE_ARM}();\n"
+    )
+
     engine_ok = setuid_order(task_work(f"{ENTRY}(work->old_uid, work->new_uid)"), engine)[0] == "ok"
     engine_caught = setuid_order(task_work(f"{ENTRY}(work->new_uid, work->old_uid)"), engine)[0] == "reversed"
     primitive_ok = setuid_order(task_work(f"{PRIMITIVE}(work->new_uid, work->old_uid)"), engine)[0] == "ok"
@@ -492,11 +631,26 @@ int {ENTRY}(uid_t ruid, uid_t euid, uid_t suid)
         ("setuid order through a wrapper", wrapper_ok),
         ("setuid order reversed on a wrapper tree", wrapper_caught),
         ("tree that does not declare it", undeclared_ok),
+        ("patch arms the spoof", patch_arms_the_spoof(patch(armed))[0] == "ok"),
+        (
+            # The sharp one: the call is written out in full, so a check that looks for the name in
+            # the patch text passes, and only one that strips comments and looks for a call does not.
+            "patch names it only inside a comment",
+            patch_arms_the_spoof(
+                patch(armed.replace(f"+\t\t{LATE_ARM}();\n", f"+\t\t// {LATE_ARM}();\n"))
+            )[0]
+            == "missing",
+        ),
+        ("patch adds it off the late path", patch_arms_the_spoof(patch(apart))[0] == "missing"),
+        (
+            "patch for a tree with no spoof",
+            patch_arms_the_spoof(patch("@@ -1 +1 @@\n+// nothing to arm\n"))[0] == "absent",
+        ),
     ]
     for label, passed in results:
         print(f"self-test: {label} {'ok' if passed else 'FAILED'}")
     if all(passed for _, passed in results):
-        print("self-test: all three checks can fail, and none fails on a correct tree")
+        print("self-test: every check can fail, and none fails on a correct tree or a correct patch")
         return 0
     return 1
 
@@ -504,13 +658,22 @@ int {ENTRY}(uid_t ruid, uid_t euid, uid_t suid)
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--tree", help="checkout the patch has been applied to")
+    parser.add_argument(
+        "--patches",
+        metavar="DIR",
+        nargs="?",
+        const=PATCHES.as_posix(),
+        help=f"patches to check where no checkout exists (default: {PATCHES.as_posix()})",
+    )
     parser.add_argument("--self-test", action="store_true", help="run the checks against fixtures")
     arguments = parser.parse_args()
 
     if arguments.self_test:
         return self_test()
+    if arguments.patches:
+        return check_patches(Path(arguments.patches))
     if not arguments.tree:
-        parser.error("one of --tree or --self-test is required")
+        parser.error("one of --tree, --patches or --self-test is required")
 
     root = Path(arguments.tree)
 

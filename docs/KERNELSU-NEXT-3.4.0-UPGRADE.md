@@ -231,6 +231,15 @@ fail without failing a correct tree. Run against the previous patch the first ch
 `ksu_avc_spoof_late_init()`. Upstream adds to that tail, and the next addition would otherwise be dropped
 the same way — by someone reading a diff rather than by something refusing one.
 
+A tree check only covers what the run applied, and a run applies one flavour at one ref — the default is
+`kernelsu-next` at `v3.3.0`. So the same guard is also made against the diffs themselves: the `ksud` job
+runs `--self-test` and then `tools/check_rkp_branch.py --patches kernelsu/patches`, which needs no
+checkout and no network, and refuses any published patch that names the spoof but does not leave the
+late-load branch of `init.c` calling it. That is what makes the 3.4.0 patch — which nothing builds by
+default — as guarded as the one a run does apply. The two are run together on purpose: a guard whose
+fixtures have rotted passes exactly like a guard with nothing to catch, so the self-test is what says the
+check below it can still fail.
+
 ## The version number is derived from the tag, not written down
 
 `kernel/Kbuild` computes the module's version as `30000 + git rev-list --count HEAD` and prints it while

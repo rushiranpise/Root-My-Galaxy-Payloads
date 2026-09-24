@@ -195,6 +195,16 @@ jobs:
           fi
           echo "Building against ${{ env.KSU_REF }} with ${{ env.PATCH }}"
 
+      - name: Every published patch still arms the spoof it enables
+        run: |
+          # The two checks that need no checkout, which is why they are here rather than in each of the
+          # jobs below: the self-test is the proof that those jobs' tree check can fail at all, and
+          # `--patches` reads diffs - so it covers the patches no job in this run applies. Only the
+          # flavour and ref a run asks for is ever built, so without this a rebase that dropped the
+          # arming from the 3.4.0 patch would go unnoticed until somebody asked for a v3.4.0 build.
+          python3 tools/check_rkp_branch.py --self-test
+          python3 tools/check_rkp_branch.py --patches kernelsu/patches
+
       - name: Checkout KernelSU
         uses: actions/checkout@v7
         with:
