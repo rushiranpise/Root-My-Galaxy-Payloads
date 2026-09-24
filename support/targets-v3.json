@@ -349,6 +349,24 @@
       }
     },
     {
+      "payloadId": "a53x-A536EXXSNGZG3-rsksu420",
+      "displayName": "Galaxy A53 5G | Kernel 5.10.237 | ReSukiSU 4.2.0-rc3 (test)",
+      "models": ["SM-A536E"],
+      "kernelVersions": ["5.10.237"],
+      "flavor": "resukisu",
+      "requiresFreshP0Session": true,
+      "exploit": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/artifacts/a53x-A536EXXSNGZG3/cve-2026-43499-app.so",
+        "size": 55912
+      },
+      "kernelsu": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-rsksu-A536EXXSNGZG3-kdp",
+        "size": 4369928,
+        "sha256": "02e5abf1b6e11a88642b956369cfb2d0e2658275e6b2294e234053690ec13709",
+        "version": "4.2.0-rc3"
+      }
+    },
+    {
       "payloadId": "a53x-A536EXXSNGZG3-ksun340",
       "displayName": "Galaxy A53 5G | Kernel 5.10.237 | KernelSU-Next 3.4.0 (test)",
       "models": ["SM-A536E"],
