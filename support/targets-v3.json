@@ -614,6 +614,24 @@
       }
     },
     {
+      "payloadId": "e3q-S9280ZCS6DZF2-ksun340",
+      "displayName": "Galaxy S24 Ultra China | Kernel 6.1.145 (S9280ZCS6DZF2) | KernelSU-Next 3.4.0 (test)",
+      "models": ["SM-S9280"],
+      "kernelVersions": ["6.1.145"],
+      "flavor": "kernelsu-next",
+      "requiresFreshP0Session": true,
+      "exploit": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/artifacts/e3q-S9280ZCS6DZF2/cve-2026-43499-app.so",
+        "size": 127120
+      },
+      "kernelsu": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-next-e3q-S9280ZCS6DZF2-kdp",
+        "size": 4251728,
+        "sha256": "a407668b88771d6effaaa497b06f1d4618d5436091b6a58519baa6876bb4230d",
+        "version": "3.4.0"
+      }
+    },
+    {
       "payloadId": "e3q-S9280ZCS6DZF2-rsksu420",
       "displayName": "Galaxy S24 Ultra China | Kernel 6.1.145 (S9280ZCS6DZF2) | ReSukiSU 4.2.0-rc3 (test)",
       "models": ["SM-S9280"],
