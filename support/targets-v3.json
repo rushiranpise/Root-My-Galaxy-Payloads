@@ -281,6 +281,23 @@
       }
     },
     {
+      "payloadId": "a36xq-A366WVLS3AYG1-ksun340",
+      "displayName": "Galaxy A36 5G | Kernel 6.6.46 | KernelSU-Next 3.4.0 (test)",
+      "models": ["SM-A366W"],
+      "kernelVersions": ["6.6.46"],
+      "flavor": "kernelsu-next",
+      "exploit": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/artifacts/a36xq-A366WVLS3AYG1/cve-2026-43499-app.so",
+        "size": 130512
+      },
+      "kernelsu": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-next-A366WVLS3AYG1-kdp",
+        "size": 4230992,
+        "sha256": "42d20ab312db440000688e923427f546208ad40c757bb4555a6ad767b44ed48e",
+        "version": "3.4.0"
+      }
+    },
+    {
       "payloadId": "a36xq-A366WVLS3AYG1-rsksu420",
       "displayName": "Galaxy A36 5G | Kernel 6.6.46 | ReSukiSU 4.2.0-rc3 (test)",
       "models": ["SM-A366W"],
