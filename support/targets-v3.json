@@ -65,6 +65,25 @@
       }
     },
     {
+      "payloadId": "pa2q-S9360ZCSCCZG1-ksun340",
+      "displayName": "Galaxy S25+ | Kernel 6.6.98 | KernelSU-Next 3.4.0 (test)",
+      "models": [
+        "SM-S9360"
+      ],
+      "kernelVersions": ["6.6.98"],
+      "flavor": "kernelsu-next",
+      "exploit": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/artifacts/pa2q-S9360ZCSCCZG1/cve-2026-43499-app.so",
+        "size": 126848
+      },
+      "kernelsu": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-next-pa2q-S9360ZCSCCZG1-kdp",
+        "size": 4230992,
+        "sha256": "ab806a4e6e1c7e456ffe4cad2f4a6e87648108323aa7574b1a4e0d861fb7bf1f",
+        "version": "3.4.0"
+      }
+    },
+    {
       "payloadId": "pa2q-S9360ZCSCCZG1-rsksu420",
       "displayName": "Galaxy S25+ | Kernel 6.6.98 | ReSukiSU 4.2.0-rc3 (test)",
       "models": [
