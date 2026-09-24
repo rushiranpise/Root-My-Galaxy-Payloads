@@ -248,6 +248,23 @@
       }
     },
     {
+      "payloadId": "essi-A566EXXSCCZG6-ksun340",
+      "displayName": "Galaxy A56 5G | Kernel 6.6.102 | KernelSU-Next 3.4.0 (test)",
+      "models": ["SM-A5660", "SM-A566B", "SM-A566E", "SM-A566S", "SM-A566U1", "SM-A566W"],
+      "kernelVersions": ["6.6.102"],
+      "flavor": "kernelsu-next",
+      "exploit": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/artifacts/essi-A566EXXSCCZG6/cve-2026-43499-app.so",
+        "size": 127392
+      },
+      "kernelsu": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-next-A566EXXSCCZG6-kdp",
+        "size": 4230864,
+        "sha256": "52da9be20ec4da6c590881a50534eea82db2afc98c987ec03dabd50954238727",
+        "version": "3.4.0"
+      }
+    },
+    {
       "payloadId": "essi-A566EXXSCCZG6-rsksu420",
       "displayName": "Galaxy A56 5G | Kernel 6.6.102 | ReSukiSU 4.2.0-rc3 (test)",
       "models": ["SM-A5660", "SM-A566B", "SM-A566E", "SM-A566S", "SM-A566U1", "SM-A566W"],
