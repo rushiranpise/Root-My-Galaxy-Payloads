@@ -346,6 +346,24 @@
       }
     },
     {
+      "payloadId": "e1s-S921NKSSFDZF3-ksun340",
+      "displayName": "Galaxy S24 | Kernel 6.1.157 | KernelSU-Next 3.4.0 (test)",
+      "models": ["SM-S921N"],
+      "kernelVersions": ["6.1.157"],
+      "flavor": "kernelsu-next",
+      "requiresFreshP0Session": true,
+      "exploit": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/artifacts/e1s-S921NKSSFDZF3/cve-2026-43499-app.so",
+        "size": 140872
+      },
+      "kernelsu": {
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-next-e1s-S921NKSSFDZF3-kdp",
+        "size": 4251600,
+        "sha256": "51bcdb03ecca809c6474c6002ebebd5e5d4602afe5fdaebc18a5bc4f2ad52aac",
+        "version": "3.4.0"
+      }
+    },
+    {
       "payloadId": "dm1q-S911U1UES6DYI3",
       "displayName": "Galaxy S23 (base) | Kernel 5.15.153 | tracefs/MCAST route",
       "models": ["SM-S911U1"],
