@@ -58,6 +58,23 @@
 #define P0_ORACLE_PROBE_OFFSET 0x1f0000ULL
 #define P0_FINGERPRINT_HEADER \
   "targets/pa3q-S938NKSUACZF1/p0_fingerprint.h"
+/*
+ * Keep the boot after the stack writer has run, rather than spending it.
+ *
+ * The shared default stops the supervisor once a child has run the writer, on the
+ * grounds that another attempt cannot be trusted after it. On this target it can:
+ * the artifact that roots on this device was built before that refusal existed, and
+ * its own log shows it making three more attempts on one boot after its writer ran -
+ * two reaching the physrw page, the third matching it and rooting - and this app's
+ * runs have repeated the trick with the offset the supervisor retains below.
+ *
+ * What the refusal costs here is a whole run rather than an attempt. The first attempt
+ * that reaches the pipe page and finds it poisoned ends the payload, and the page is a
+ * lottery: the same kernel hands out a good one roughly one time in three. So a cold
+ * boot loses the first run to a poisoned page and roots on the next, which is a reboot
+ * or a second run for every boot.
+ */
+#define APP_P0_RETRY_AFTER_WRITER 1
 #endif
 #define KERNELSNITCH_IDENTITY_START 0xffffff8000000000ULL
 #define KERNELSNITCH_IDENTITY_END 0xffffff9000000000ULL

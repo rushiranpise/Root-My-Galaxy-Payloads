@@ -235,8 +235,18 @@ __attribute__((constructor)) static void load(void) {
 
 #if defined(APP_PAYLOAD) && defined(SLIDE_P0_OFFSET_CANDIDATES)
     if (atomic_load(&app_p0_state->writer_started)) {
+#if defined(APP_P0_RETRY_AFTER_WRITER) && APP_P0_RETRY_AFTER_WRITER
+      /*
+       * Most targets spend the boot here, because another attempt after the writer has
+       * run cannot be trusted on them. This one keeps it: see the macro's own note in
+       * the target header. The offset below is what the next attempt runs with, so the
+       * leak is not re-run - only the page is drawn again.
+       */
+      pr_warning("stack writer ran; keeping the boot and retrying\n");
+#else
       pr_error("stack writer ran; refusing retry on this boot\n");
       break;
+#endif
     }
 #endif
 
