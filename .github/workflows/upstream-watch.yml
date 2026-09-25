@@ -15,11 +15,14 @@ name: Upstream KernelSU
 #      decision rather than a merge, and that one opens an issue carrying the merged hunks.
 #   2. **A pair for every target the feed serves.** `tools/pairs.py` derives that list from the
 #      feed and the artifacts already published, so a device port is enough to have it rebuilt.
-#      Each pair is built by `ksu-build.yml`, which then publishes it. That derivation is the only
-#      thing that knows which DDK image a pair builds in - a published name may carry the kernel
-#      release while the image is per family - so it is passed on rather than re-derived per job.
-#   3. **The feed entry that serves it** - url, size, digest, and the KernelSU version its payload
-#      id and display name carry - which that workflow commits.
+#      `rebuild` builds each pair with `ksu-build.yml`, and the run's `publish` job then collects
+#      what the matrix produced. That derivation is the only thing that knows which DDK image a
+#      pair builds in - a published name may carry the kernel release while the image is per
+#      family - so it is passed on rather than re-derived per job.
+#   3. **The feed entry that serves each one** - url, size, digest, and the KernelSU version its
+#      payload id and display name carry - committed once for the whole batch by that job. One
+#      commit rather than one per pair, because every pair pushes to the same branch: a push per
+#      pair is a race between the runs and a feed that is briefly half updated.
 #
 # Nothing is published until the rebase lands. What a merge resolved is listed in the run's own
 # summary, because a resolved conflict is a decision the repository made and a reviewer should be
@@ -248,6 +251,10 @@ jobs:
           # against the version stamped into the daemon it serves. Both were defects before they were
           # checks, and neither is visible from a build that succeeds.
           python3 tools/pairs.py --repo . --self-test
+          # The batch publisher's own decisions, checked here rather than in the job that uses it:
+          # that job runs once, at the end, on whatever the matrix managed to build, and a tool that
+          # was wrong would be read as a pair that failed to build.
+          python3 tools/publish_pairs.py --self-test
 
       - name: Derive the pairs
         id: matrix
@@ -287,7 +294,8 @@ jobs:
           python3 tools/report_plan.py /tmp/plan.json >> "$GITHUB_STEP_SUMMARY"
 
   # ---------------------------------------------------------------------------------------------
-  # One build per pair, each of which publishes what it built.
+  # One build per pair. Nothing here publishes: the matrix only produces the artifacts, and the
+  # run's `publish` job below collects them and commits the batch once.
   # ---------------------------------------------------------------------------------------------
   rebuild:
     # Named for the pair it builds, which is what the run list shows beside this.
@@ -296,8 +304,10 @@ jobs:
     if: needs.plan.outputs.count != '0'
     strategy:
       fail-fast: false
-      # Two at a time keeps the DDK pulls moving; the publish job inside the called workflow
-      # serialises the feed commit itself, because every pair pushes to the same branch.
+      # Two at a time keeps the DDK pulls moving. It is not a limit on publishing, because nothing
+      # in the matrix publishes - the batch job commits once at the end. That is what lets this be
+      # as wide as the DDK will bear without the runs racing on the branch, and what keeps the feed
+      # from being left half updated between two pushes.
       max-parallel: 2
       matrix:
         pair: ${{ fromJSON(needs.plan.outputs.pairs) }}
@@ -314,6 +324,84 @@ jobs:
       target_id: ${{ matrix.pair.targetId }}
       target_release: ${{ matrix.pair.release }}
       pair_kmi: ${{ matrix.pair.kmi }}
-      publish: true
+      # The matrix builds; the batch job below publishes. The per-pair publish job inside the called
+      # workflow is still what a one-pair dispatch uses, and it is deliberately not used here.
+      publish: false
       migrate: ${{ matrix.pair.migrate }}
     secrets: inherit
+
+  # ---------------------------------------------------------------------------------------------
+  # The batch's one commit.
+  #
+  # Rebuilding many pairs with one commit each means one push each, so the runs race on the branch
+  # the feed is served from and the feed is left half updated between two of them. This publishes
+  # what the matrix built in a single commit instead: every pair is verified and written into the
+  # tree, and `tools/publish_pairs.py` commits the lot.
+  #
+  # A pair whose build legs failed is named and skipped rather than withholding the rest, so the run
+  # is red while the feed still moves - which is the point of publishing the batch together.
+  # ---------------------------------------------------------------------------------------------
+  publish:
+    name: publish the batch
+    needs: [plan, rebuild]
+    # `always()`, because a matrix leg that failed is exactly the case this job reports on: the pairs
+    # that did build are still worth publishing. `plan.result` is then the guard that `always()`
+    # removed: with nothing moved, `plan` is skipped and its `count` is empty, and an empty count is
+    # not the string `'0'` - so without this the job would run, find no plan and publish an empty
+    # batch on every scheduled run that had nothing to do.
+    if: always() && needs.plan.result == 'success' && needs.plan.outputs.count != '0'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout payloads
+        uses: actions/checkout@v7
+        with:
+          # The branch the detect job may have committed a rebased patch to, which is what these
+          # pairs were built against.
+          ref: ${{ github.ref_name }}
+
+      - name: The pairs this run planned
+        env:
+          PAIRS: ${{ needs.plan.outputs.pairs }}
+        run: |
+          printf '%s' "$PAIRS" > /tmp/plan.json
+          python3 -c "import json,sys; print(len(json.load(open(sys.argv[1]))), 'pair(s) planned')" /tmp/plan.json
+
+      - name: Collect what the matrix built
+        # A leg that failed uploads nothing, and a run where every leg failed has no artifacts at
+        # all; the publish step reports that as "published 0 of N" rather than as a download error,
+        # which is the reading an operator can act on.
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          pattern: pair-*
+          path: /tmp/artifacts
+
+      - name: Publish the batch
+        id: publish
+        # A pair that did not finish is reported below, not allowed to withhold the others.
+        continue-on-error: true
+        run: |
+          # The tool makes the run's one commit, so it needs the identity the caller would otherwise
+          # set before its own.
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python3 tools/publish_pairs.py --repo . --plan /tmp/plan.json \
+            --downloaded /tmp/artifacts \
+            --url-prefix "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}" \
+            --commit
+
+      - name: Push the batch
+        # Whether or not every pair published: the pairs that did are a commit in the tree, and
+        # dropping them would lose a whole matrix's work.
+        if: always()
+        run: |
+          # A no-op when nothing published, or when the feed already served every pair: an up-to-date
+          # `git push` succeeds with nothing to say.
+          git pull --rebase --autostash
+          git push
+
+      - name: The pairs that did not publish
+        if: steps.publish.outcome == 'failure'
+        run: |
+          echo "::error::not every planned pair published; the step above names which, and why"
+          exit 1

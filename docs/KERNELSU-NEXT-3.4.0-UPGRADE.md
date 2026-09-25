@@ -367,6 +367,14 @@ stops with the `init.c` diff in the report — one hunk to read, not a rebase to
 should commit itself, and the case that should not. `init.c` needed the decision above, and the tool was
 right to refuse it.
 
+What the watcher does with the pairs, once the patch is there, is build them all and publish them once.
+The matrix in `rebuild` calls `ksu-build.yml` with `publish: false`, so each leg produces a module and a
+daemon and nothing else, and the run's `publish` job collects those artifacts and makes a single commit
+through `tools/publish_pairs.py`. That is deliberate: one commit per pair meant one push per pair, so a
+rebuild of every target raced on this branch and could leave the feed half updated between two pushes. A
+pair whose legs failed is named and skipped rather than withholding the rest, so the run goes red while
+the pairs that did build still reach the feed.
+
 ## The app side is nothing
 
 Unlike the tiann leg, nothing in the app moves for this release. The manager-version picker reads the
@@ -383,7 +391,7 @@ name, which carries no version:
 | daemon | `kernelsu/ksud-next-pa3q-S938USQSCCZF9-kdp` |
 | flavour | `kernelsu-next` |
 
-The daemon's file name is unchanged from the 3.3.0 pair, so the publish job rewrites that entry in place
+The daemon's file name is unchanged from the 3.3.0 pair, so the publish rewrites that entry in place
 rather than adding a sibling beside it. Keeping both side by side is possible — the ids differ by suffix —
 but then the sheet offers two Next entries for one device and the 3.3.0 one is the tested one.
 

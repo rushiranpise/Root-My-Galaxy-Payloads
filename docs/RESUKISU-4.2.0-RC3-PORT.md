@@ -198,8 +198,10 @@ already-patched, and does nothing on its own. A forced, scoped dispatch is the w
 gh workflow run upstream-watch.yml -f flavor=resukisu -f force=true -f targets=pa3q-S938USQSCCZF9
 ```
 
-which resolves `refs[resukisu]=v4.2.0-rc3`, plans only the `pa3q` pair, and calls `ksu-build.yml` with
-`publish=true`. What lands is the same feed entry, rewritten in place by daemon file name:
+which resolves `refs[resukisu]=v4.2.0-rc3`, plans only the `pa3q` pair, and calls `ksu-build.yml` to
+build it. The matrix builds and publishes nothing; the run's own `publish` job collects what it built
+and commits the batch once, so a rebuild of many pairs is one commit rather than one push per pair. What
+lands is the same feed entry, rewritten in place by daemon file name:
 
 | | |
 | --- | --- |
@@ -214,7 +216,7 @@ field and the sheet reads the version out of the entry, so a rebuilt pair is the
 
 ### The label the first publish left behind
 
-The rebuild's own publish step rewrote the entry's `version` to `4.2.0-rc3` and left its `displayName`
+The publish step rewrote the entry's `version` to `4.2.0-rc3` and left its `displayName`
 reading `ReSukiSU 4.2.0-rc2` - the two facts the Next record insists are one fact, disagreeing in the
 feed. The cause is a pre-release and the id arithmetic: `update_feed.py` retitled the label only when
 the payload id's numeric suffix moved, and `4.2.0-rc2` and `4.2.0-rc3` both derive `420`, so the id
