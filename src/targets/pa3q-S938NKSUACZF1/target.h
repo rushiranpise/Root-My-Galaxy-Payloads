@@ -177,18 +177,16 @@
 #define STRUCT_PAGE_TYPE_OFF 0x30
 
 /*
- * enum kmalloc_cache_type on this kernel is the 6.1+ one with CONFIG_ZONE_DMA
- * off and CONFIG_RANDOM_KMALLOC_CACHES off, so it is
- * { NORMAL=0, DMA=0, CGROUP=1, RECLAIM=2, NR=3 } - three rows of 14, not the
- * four rows the unoverridden shared defaults assume.  Leaving this at the
- * default 2 reads the reclaim row, and on a kernel whose reclaim caches were
- * aliased to the normal ones that is the normal row: the pipe-buffer cache gate
- * then compares every pipe page's slab cache against kmalloc-2k and never
- * against the kmalloc-cg-2k the pages were really charged to, so the gate can
- * never match and the second stage dies at `phys step cache gate failed`.
+ * The shared row stands: it is the one this target's pipe pages are charged to.
+ *
+ * There is no kmalloc-cg-* cache on this kernel to miss.  /proc/slabinfo lists
+ * kmalloc-1k/2k/4k/8k and kmalloc-rcl-1k/2k/4k/8k, the reclaim caches hold no
+ * objects, and no cache claims kmalloc-cg-2k as an alias.  The artifact that
+ * rooted on the device reads the shared row, prints cgroup2k == normal2k, and
+ * then matches the pipe page's own slab cache, so the gate is comparing against
+ * the cache the pages came from.  Naming a row here - 1 would be the empty
+ * kmalloc-rcl-2k - is what would break it.
  */
-#define KMALLOC_CGROUP_TYPE 1
-#define KMALLOC_CACHE_TYPES 3
 
 #define PIPE_BUFFER_SLOTS 32
 #define PIPE_BUF_FLAG_CAN_MERGE 0x10
