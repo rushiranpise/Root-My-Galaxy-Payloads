@@ -21,6 +21,11 @@
 #define SLIDE_LOCK_OWNER_VALUE 1ULL
 #define SLIDE_USE_FAKE_TASK 1
 #define SLIDE_TRACEFS_WORKER_CALLER_OFF 0x000d97ecULL
+// Read off this kernel rather than guessed: `/sys/kernel/tracing/events/sched/sched_blocked_reason/id`
+// on 6.6.98-android15-8 (S938USQSCCZF9) answers 109, the same fallback `src/slide.c` carries. The
+// stable race path in `src/slide_app.c` reads the id from this header, so a target that never names
+// it cannot build that recipe at all.
+#define SLIDE_TRACEFS_EVENT_ID 109
 #define SLIDE_P0_OFFSET_CANDIDATES \
   0x150000ULL, 0x100000ULL, 0x130000ULL, 0x090000ULL, \
   0x1c0000ULL, 0x180000ULL, 0x050000ULL, 0x1a0000ULL, \
