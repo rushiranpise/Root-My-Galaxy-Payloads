@@ -102,43 +102,17 @@ static int attempt_delay_usec(int base_delay, int attempt) {
   return delay < 0 ? 0 : delay;
 }
 
-#if defined(APP_PAYLOAD) && APP_PAYLOAD
-/*
- * How long after a boot this payload waits before it touches the kernel.
- *
- * The app decides this and hands it down, because the app runs its own settle gate in front of the
- * same boot and the two are one decision. Left to a constant, a run the user chose to start early
- * waited out the remainder of this window anyway, with nothing on screen counting and nothing in the
- * log saying why - a pause no one asked for, in the one part of a run that cannot be interrupted by
- * anything but the user's own override.
- *
- * Bounded above by the compiled default, so an environment can only shorten the wait. Raising it
- * from outside would be a way to make a run sit for minutes on a device whose owner cannot see the
- * value, and nothing that sets an environment needs that power.
- */
-static int boot_quiet_window_sec(void) {
-  return env_int("P0_MIN_BOOT_UPTIME_SEC", APP_MIN_BOOT_UPTIME_SEC, 0,
-                 APP_MIN_BOOT_UPTIME_SEC);
-}
-#endif
-
 static void wait_for_boot_quiet_window(void) {
 #if defined(APP_PAYLOAD) && APP_PAYLOAD
   struct timespec uptime;
   SYSCHK(clock_gettime(CLOCK_BOOTTIME, &uptime));
-  int gate_sec = boot_quiet_window_sec();
-  if (uptime.tv_sec < gate_sec) {
-    time_t wait_sec = gate_sec - uptime.tv_sec;
-    pr_info("waiting for boot allocator quiet window gate=%d seconds=%lld uptime=%lld\n",
-            gate_sec, (long long)wait_sec, (long long)uptime.tv_sec);
+  if (uptime.tv_sec < APP_MIN_BOOT_UPTIME_SEC) {
+    time_t wait_sec = APP_MIN_BOOT_UPTIME_SEC - uptime.tv_sec;
+    pr_info("waiting for boot allocator quiet window seconds=%lld uptime=%lld\n",
+            (long long)wait_sec, (long long)uptime.tv_sec);
     while (wait_sec > 0) {
       wait_sec = sleep((unsigned int)wait_sec);
     }
-  } else {
-    // Says which side chose this, and that it cost the run nothing: the gate is already met, so a
-    // run started early is the app's decision rather than this payload sleeping through a floor.
-    pr_info("boot allocator quiet window already met gate=%d uptime=%lld\n",
-            gate_sec, (long long)uptime.tv_sec);
   }
 #endif
 }
