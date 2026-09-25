@@ -176,6 +176,20 @@
 #define STRUCT_SLAB_CACHE_OFF 0x08
 #define STRUCT_PAGE_TYPE_OFF 0x30
 
+/*
+ * enum kmalloc_cache_type on this kernel is the 6.1+ one with CONFIG_ZONE_DMA
+ * off and CONFIG_RANDOM_KMALLOC_CACHES off, so it is
+ * { NORMAL=0, DMA=0, CGROUP=1, RECLAIM=2, NR=3 } - three rows of 14, not the
+ * four rows the unoverridden shared defaults assume.  Leaving this at the
+ * default 2 reads the reclaim row, and on a kernel whose reclaim caches were
+ * aliased to the normal ones that is the normal row: the pipe-buffer cache gate
+ * then compares every pipe page's slab cache against kmalloc-2k and never
+ * against the kmalloc-cg-2k the pages were really charged to, so the gate can
+ * never match and the second stage dies at `phys step cache gate failed`.
+ */
+#define KMALLOC_CGROUP_TYPE 1
+#define KMALLOC_CACHE_TYPES 3
+
 #define PIPE_BUFFER_SLOTS 32
 #define PIPE_BUF_FLAG_CAN_MERGE 0x10
 
