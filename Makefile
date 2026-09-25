@@ -76,8 +76,12 @@ APP_PUBLISH_RECIPE := $(or \
   $(patsubst $(TARGET)=%,%,$(filter $(TARGET)=%,$(APP_PUBLISH_RECIPES))),release)
 
 # The file that recipe writes, which is the artifact a feed entry names.
-APP_PUBLISH_ARTIFACT := $(if $(filter all,$(APP_PUBLISH_RECIPE)),$(APP_PRELOAD),\
-  $(if $(filter stable,$(APP_PUBLISH_RECIPE)),$(APP_STABLE),$(APP_RELEASE)))
+#
+# `$(strip ...)` because the `$(if)` below spans a line continuation, and the whitespace after one is
+# part of the value: without it the answer begins with a space, and a caller that copies it gets a
+# path that reads correctly in a log and names a file that does not exist.
+APP_PUBLISH_ARTIFACT := $(strip $(if $(filter all,$(APP_PUBLISH_RECIPE)),$(APP_PRELOAD),\
+  $(if $(filter stable,$(APP_PUBLISH_RECIPE)),$(APP_STABLE),$(APP_RELEASE))))
 
 # The fixed size the published artifact is padded to, or empty for the plain build, which has none - so
 # that a check on the artifact's byte count is about the recipes that make that promise.
