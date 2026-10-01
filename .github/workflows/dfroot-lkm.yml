@@ -106,19 +106,27 @@ jobs:
               exit 1
             fi
           done
-          # And the DEFEX fix, which is the same kind of fact: upstream moved the hook from
-          # `get_dc_target_dpath` to `task_defex_enforce` because the path-based one is not the
-          # enforcement entry point on every kernel. A rebase onto an older revision would take the hook
-          # back with it, build cleanly, and leave the devices the fix was for still refusing the insmod.
-          grep -q "task_defex_enforce" /tmp/strings.txt || {
-            echo "::error::the module no longer hooks task_defex_enforce, which is the DEFEX fix from upstream 23085ef"
+          # And the DEFEX pair, which is the same kind of fact and one this project has learned the hard
+          # way. `task_defex_user_exec` is what every revision hooks; `get_dc_target_dpath` is the one
+          # upstream's 23085ef *replaced* with `task_defex_enforce`, and taking that replacement here cost a
+          # build: the chain failed at the last step with an empty root-owned daemon log and a consumed stage
+          # file, which is DEFEX killing an exec out of a data path, and two runs hung the phone. So the
+          # path-based hook is required by this build, and the enforcement function upstream moved to is
+          # required to be absent - it is the one difference between the two, and a kernel that skips an
+          # enforcement function it expected to run is the plausible source of the hang.
+          grep -q "task_defex_user_exec" /tmp/strings.txt || {
+            echo "::error::the module no longer hooks task_defex_user_exec"
             exit 1
           }
-          if grep -q "get_dc_target_dpath" /tmp/strings.txt; then
-            echo "::error::the path-based DEFEX hook is back, which is the revision before the fix"
+          grep -q "get_dc_target_dpath" /tmp/strings.txt || {
+            echo "::error::the module no longer hooks the path-based DEFEX entry point, which is what lets a daemon in the app's data directory run at all"
+            exit 1
+          }
+          if grep -q "task_defex_enforce" /tmp/strings.txt; then
+            echo "::error::the module hooks task_defex_enforce again, which failed this project's chain and hung the phone"
             exit 1
           fi
-          echo "the module's daemon command is this project's, and its DEFEX hook is the fixed one"
+          echo "the module's daemon command is this project's, and its DEFEX hooks are the pair this device needs"
 
       - name: Name it for the KMI it was built for
         run: |
