@@ -106,7 +106,19 @@ jobs:
               exit 1
             fi
           done
-          echo "the module's daemon command is this project's"
+          # And the DEFEX fix, which is the same kind of fact: upstream moved the hook from
+          # `get_dc_target_dpath` to `task_defex_enforce` because the path-based one is not the
+          # enforcement entry point on every kernel. A rebase onto an older revision would take the hook
+          # back with it, build cleanly, and leave the devices the fix was for still refusing the insmod.
+          grep -q "task_defex_enforce" /tmp/strings.txt || {
+            echo "::error::the module no longer hooks task_defex_enforce, which is the DEFEX fix from upstream 23085ef"
+            exit 1
+          }
+          if grep -q "get_dc_target_dpath" /tmp/strings.txt; then
+            echo "::error::the path-based DEFEX hook is back, which is the revision before the fix"
+            exit 1
+          fi
+          echo "the module's daemon command is this project's, and its DEFEX hook is the fixed one"
 
       - name: Name it for the KMI it was built for
         run: |
