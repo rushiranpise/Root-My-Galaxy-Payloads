@@ -67,6 +67,7 @@ APP_PUBLISH_RECIPES := \
   e3q-S928BXXS6DZF2=stable \
   e3q-S928USQS6DZF2=stable \
   pa2q-S9360ZCSCCZG1=all \
+  pa3q-S938U1UEUDDZJB=all \
   psq-S9370ZCS9CZG1=all \
   q7q-F966BXXSBBZG3=all \
   q7q-F966USQSBBZG3=all \
@@ -115,6 +116,20 @@ APP_PRELOAD_SRCS := \
   src/targets/a53x-A536EXXSNGZG3/chain.c \
   src/targets/a53x-A536EXXSNGZG3/ghostlock.c \
   src/targets/a53x-A536EXXSNGZG3/page.c
+PRELOAD_SRCS := $(APP_PRELOAD_SRCS)
+APP_RELEASE_OPT := -O2
+APP_RELEASE_LINK_FLAGS := -Wl,--gc-sections -Wl,--icf=all -s
+endif
+
+ifeq ($(TARGET),pa3q-S938U1UEUDDZJB)
+APP_PRELOAD_SRCS := \
+  src/targets/pa3q-S938U1UEUDDZJB/payload.c \
+  src/targets/pa3q-S938U1UEUDDZJB/cve98260/kernel_table.c \
+  src/targets/pa3q-S938U1UEUDDZJB/cve98260/calib_core.c \
+  src/targets/pa3q-S938U1UEUDDZJB/cve98260/calib.c \
+  src/targets/pa3q-S938U1UEUDDZJB/cve98260/timer_probe.c \
+  src/targets/pa3q-S938U1UEUDDZJB/cve98260/uaf_plant.c \
+  src/targets/pa3q-S938U1UEUDDZJB/cve98260/pc98260_rootd.c
 PRELOAD_SRCS := $(APP_PRELOAD_SRCS)
 APP_RELEASE_OPT := -O2
 APP_RELEASE_LINK_FLAGS := -Wl,--gc-sections -Wl,--icf=all -s

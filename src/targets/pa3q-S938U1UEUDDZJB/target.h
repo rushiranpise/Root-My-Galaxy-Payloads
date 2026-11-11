@@ -1,0 +1,9 @@
+#ifndef OFFSET_H
+#define OFFSET_H
+
+#define BUILD_VARIANT_LABEL "pa3q-S938U1UEUDDZJB-app-cve-2026-98260"
+
+#define KIMAGE_TEXT_BASE 0xffffffc080000000ULL
+#define P0_PAGE_OFFSET 0xffffff7f80000000ULL
+
+#endif
