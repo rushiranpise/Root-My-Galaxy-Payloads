@@ -1009,8 +1009,8 @@
       "kernelVersions": ["6.6.127-android15-8-p87b1ce1-abogkiS938USQUDDZJB-4k"],
       "exploit": {
         "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/artifacts/pa3q-S938U1UEUDDZJB/cve-2026-98260-app.so",
-        "size": 72592,
-        "sha256": "58f9daeeb69e0bb96dc609da0cc54a2aaff91ecd7ea890899a330d9670ac0bc9"
+        "size": 72896,
+        "sha256": "b551690bbf15e4657ee07fb1873ee123fc14a72e328676abf0c22c3d2fe9f75b"
       },
       "kernelsu": {
         "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-pa3q-S938U1UEUDDZJB-kdp",
@@ -1027,8 +1027,8 @@
       "flavor": "kernelsu-next",
       "exploit": {
         "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/artifacts/pa3q-S938U1UEUDDZJB/cve-2026-98260-app.so",
-        "size": 72592,
-        "sha256": "58f9daeeb69e0bb96dc609da0cc54a2aaff91ecd7ea890899a330d9670ac0bc9"
+        "size": 72896,
+        "sha256": "b551690bbf15e4657ee07fb1873ee123fc14a72e328676abf0c22c3d2fe9f75b"
       },
       "kernelsu": {
         "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-next-pa3q-S938U1UEUDDZJB-kdp",
@@ -1045,8 +1045,8 @@
       "flavor": "resukisu",
       "exploit": {
         "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/artifacts/pa3q-S938U1UEUDDZJB/cve-2026-98260-app.so",
-        "size": 72592,
-        "sha256": "58f9daeeb69e0bb96dc609da0cc54a2aaff91ecd7ea890899a330d9670ac0bc9"
+        "size": 72896,
+        "sha256": "b551690bbf15e4657ee07fb1873ee123fc14a72e328676abf0c22c3d2fe9f75b"
       },
       "kernelsu": {
         "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-rsksu-pa3q-S938U1UEUDDZJB-kdp",

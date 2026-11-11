@@ -122,6 +122,7 @@ APP_RELEASE_LINK_FLAGS := -Wl,--gc-sections -Wl,--icf=all -s
 endif
 
 ifeq ($(TARGET),pa3q-S938U1UEUDDZJB)
+TARGET_CFLAGS += -Isrc/targets/$(TARGET) -Isrc/targets/$(TARGET)/cve98260
 APP_PRELOAD_SRCS := \
   src/targets/pa3q-S938U1UEUDDZJB/payload.c \
   src/targets/pa3q-S938U1UEUDDZJB/cve98260/kernel_table.c \
