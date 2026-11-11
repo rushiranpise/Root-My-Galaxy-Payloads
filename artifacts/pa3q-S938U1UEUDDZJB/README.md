@@ -8,6 +8,5 @@ This is the DDZJB timer payload. It is built from the timer engine in
   and the linear-map base, runs the timer UAF, and starts the app helper daemon
   with root so the normal `--late-load` path still works.
 
-The three feed rows point at the existing 6.6 KDP daemons as test daemons until
-a DDZJB-specific `ksud` is built. They are not a claim that those modules were
-compiled against DDZJB. The app row says `test daemon` for that reason.
+The three feed rows point at the exact DDZJB `ksud` daemons built by the KernelSU
+workflow, each embedding its own DDZJB kernel module.

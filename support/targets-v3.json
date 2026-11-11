@@ -1004,7 +1004,7 @@
     },
     {
       "payloadId": "pa3q-S938U1UEUDDZJB-cve-2026-98260-ksu",
-      "displayName": "Galaxy S25 Ultra (US) | S938U1UEUDDZJB | CVE-2026-98260 | KernelSU 3.3.0 (test daemon)",
+      "displayName": "Galaxy S25 Ultra (US) | S938U1UEUDDZJB | CVE-2026-98260 | KernelSU 3.3.0",
       "models": ["SM-S938U1"],
       "kernelVersions": ["6.6.127-android15-8-p87b1ce1-abogkiS938USQUDDZJB-4k"],
       "exploit": {
@@ -1013,15 +1013,15 @@
         "sha256": "58f9daeeb69e0bb96dc609da0cc54a2aaff91ecd7ea890899a330d9670ac0bc9"
       },
       "kernelsu": {
-        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-s25u-kdp",
-        "size": 6407096,
-        "sha256": "fa3edcc7d168637394877b30cb1f909d762dda788ec14051f4ae79edd6562d63",
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-pa3q-S938U1UEUDDZJB-kdp",
+        "size": 5093048,
+        "sha256": "835f4fd7711214696b33ac0c2ebe68a482f62cfd1e03a4e320b412a5b81a1f33",
         "version": "3.3.0"
       }
     },
     {
       "payloadId": "pa3q-S938U1UEUDDZJB-cve-2026-98260-ksun",
-      "displayName": "Galaxy S25 Ultra (US) | S938U1UEUDDZJB | CVE-2026-98260 | KernelSU-Next 3.4.1 (test daemon)",
+      "displayName": "Galaxy S25 Ultra (US) | S938U1UEUDDZJB | CVE-2026-98260 | KernelSU-Next 3.4.2",
       "models": ["SM-S938U1"],
       "kernelVersions": ["6.6.127-android15-8-p87b1ce1-abogkiS938USQUDDZJB-4k"],
       "flavor": "kernelsu-next",
@@ -1031,15 +1031,15 @@
         "sha256": "58f9daeeb69e0bb96dc609da0cc54a2aaff91ecd7ea890899a330d9670ac0bc9"
       },
       "kernelsu": {
-        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-next-pa3q-S938USQSCCZF9-kdp",
-        "size": 4253440,
-        "sha256": "66e8361593e01d2d57bb249ed054053b1706fe6a4edaa7351de99c10728cf47c",
-        "version": "3.4.1"
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-next-pa3q-S938U1UEUDDZJB-kdp",
+        "size": 4279896,
+        "sha256": "92d0359f0f49945ee1dd19bba95e6bc9f3e36fc717b3b90f0c4199376885a8d9",
+        "version": "3.4.2"
       }
     },
     {
       "payloadId": "pa3q-S938U1UEUDDZJB-cve-2026-98260-rsksu",
-      "displayName": "Galaxy S25 Ultra (US) | S938U1UEUDDZJB | CVE-2026-98260 | BakaSU 4.2.0-rc3 (test daemon)",
+      "displayName": "Galaxy S25 Ultra (US) | S938U1UEUDDZJB | CVE-2026-98260 | BakaSU 4.2.0-rc3",
       "models": ["SM-S938U1"],
       "kernelVersions": ["6.6.127-android15-8-p87b1ce1-abogkiS938USQUDDZJB-4k"],
       "flavor": "resukisu",
@@ -1049,9 +1049,9 @@
         "sha256": "58f9daeeb69e0bb96dc609da0cc54a2aaff91ecd7ea890899a330d9670ac0bc9"
       },
       "kernelsu": {
-        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-rsksu-pa3q-S938USQSCCZF9-kdp",
-        "size": 4366440,
-        "sha256": "0c1977e817fe24bcf862014578f6a2d286f9f84d46a57a43b7076c6f071f0312",
+        "url": "https://raw.githubusercontent.com/rushiranpise/Root-My-Galaxy-Payloads/main/kernelsu/ksud-rsksu-pa3q-S938U1UEUDDZJB-kdp",
+        "size": 4376288,
+        "sha256": "6eb54ab710b6a6e3e6f5b15d64d473ad42aca2c2efa4ab8d4fde2d97cccd6b23",
         "version": "4.2.0-rc3"
       }
     }
